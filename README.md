@@ -146,6 +146,23 @@ The initial adapter registry is deliberately finite and explicit:
 - `cpp` via `tree-sitter`: removes C++ comment nodes from `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, and `.hxx` files while preserving string literals and validating rewritten syntax.
 - `ent` via `native`: removes `.ent` line comments and replays the native parser before accepting the rewrite.
 - `markdown` via `pulldown_cmark`: supports heading-based file selection for document deletion.
+- `ext:<suffix>` or `name:<basename>` via one of the lexical adapters below: binds a parser row to an explicit file extension or exact file name. This is not language inference; the declaration itself is the match contract.
+
+Lexical comment adapters are intentionally syntax-light and fail closed on malformed block comments. They preserve quoted string regions but do not claim a full grammar:
+
+- `line-hash`, `line-hash-shebang`
+- `line-slash`, `line-semicolon`, `line-double-dash`
+- `slash-star`, `slash-comments`
+- `html-comments`
+
+For example:
+
+```ent
+parser py language ext:py via line-hash-shebang evidence py_comment_contract
+parser cmake_lists language name:CMakeLists.txt via line-hash evidence cmake_comment_contract
+```
+
+`flatten_files` copies every selected file into the destination directory using deterministic path-encoded filenames such as `3-pkg__7-util.py`. It does not delete or rewrite the source files; use it when the certificate needs to gather files into one folder without pretending that language module semantics were preserved.
 
 Unsupported files or adapters fail closed. For example, selecting Python files for `remove_comments` without a registered parser adapter rejects the whole apply run before target files are changed. If both C and C++ parsers are declared and a `.h` file matches both, apply rejects the ambiguous header instead of silently choosing one grammar; use unambiguous extensions such as `.hpp` or split the selection until a dedicated disambiguation predicate is added.
 

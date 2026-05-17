@@ -72,7 +72,7 @@ pub enum TransformError {
     SyntaxRejected { path: String, message: String },
     #[error("flatten_modules is only defined for Rust source selections")]
     NonRustFlattenSelection,
-    #[error("flatten_modules found a destination filename collision: {0}")]
+    #[error("flattening found a destination filename collision: {0}")]
     FlattenCollision(String),
     #[error("flatten_modules cannot resolve external module {module} in {file}")]
     UnresolvedRustModule { file: String, module: String },
@@ -140,6 +140,7 @@ impl TransformContext<'_> {
         match transform.operation.as_str() {
             "remove_comments" => self.remove_comments(transform),
             "flatten_modules" => self.flatten_modules(transform),
+            "flatten_files" => self.flatten_files(transform),
             "delete_files" => self.delete_files(transform),
             "delete_lines" => self.delete_lines(transform),
             "replace_text" => self.replace_text(transform, false),
@@ -165,17 +166,52 @@ impl TransformContext<'_> {
                 ("c", "tree-sitter") => self.syntax.remove_comments("c", &source, &rel)?,
                 ("cpp", "tree-sitter") => self.syntax.remove_comments("cpp", &source, &rel)?,
                 ("ent", "native") => remove_ent_comments(&source, &rel)?,
-                _ => {
-                    return Err(TransformError::UnsupportedFile {
-                        transform: transform.name.clone(),
-                        path: display_rel(&rel),
-                    });
+                (_, adapter) => {
+                    if let Some(style) = lexical_comment_style(adapter) {
+                        remove_lexical_comments(&source, style, &rel)?
+                    } else {
+                        return Err(TransformError::UnsupportedFile {
+                            transform: transform.name.clone(),
+                            path: display_rel(&rel),
+                        });
+                    }
                 }
             };
             if rewritten != source {
                 fs::write(&path, rewritten)?;
                 self.mark_write(rel);
             }
+        }
+        Ok(())
+    }
+
+    fn flatten_files(&mut self, transform: &TransformContract) -> Result<(), TransformError> {
+        let selected = self.files_for_transform_target(transform)?;
+        let destination = sanitize_relative(
+            transform
+                .destination
+                .as_deref()
+                .ok_or_else(|| TransformError::UnsupportedTransform(transform.name.clone()))?,
+        )?;
+        let target_base = self.root.join(&destination);
+        fs::create_dir_all(&target_base)?;
+
+        let mut new_names = BTreeSet::new();
+        for rel in selected {
+            if rel.starts_with(&destination) {
+                continue;
+            }
+            let target_name = flattened_file_name(&rel)?;
+            if !new_names.insert(target_name.clone()) {
+                return Err(TransformError::FlattenCollision(target_name));
+            }
+            let target_rel = destination.join(&target_name);
+            let target_abs = self.root.join(&target_rel);
+            if target_abs.exists() {
+                return Err(TransformError::FlattenCollision(target_name));
+            }
+            fs::copy(self.root.join(&rel), &target_abs)?;
+            self.mark_write(target_rel);
         }
         Ok(())
     }
@@ -812,6 +848,214 @@ fn remove_ent_comments(source: &str, rel: &Path) -> Result<String, TransformErro
     Ok(rewritten)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommentStyle {
+    Line {
+        marker: &'static str,
+        preserve_shebang: bool,
+    },
+    Block {
+        start: &'static str,
+        end: &'static str,
+    },
+    LineAndBlock {
+        line: &'static str,
+        block_start: &'static str,
+        block_end: &'static str,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StringState {
+    Single { quote: u8, escaped: bool },
+    Triple { quote: u8 },
+}
+
+fn lexical_comment_style(adapter: &str) -> Option<CommentStyle> {
+    match adapter {
+        "line-hash" => Some(CommentStyle::Line {
+            marker: "#",
+            preserve_shebang: false,
+        }),
+        "line-hash-shebang" => Some(CommentStyle::Line {
+            marker: "#",
+            preserve_shebang: true,
+        }),
+        "line-slash" => Some(CommentStyle::Line {
+            marker: "//",
+            preserve_shebang: false,
+        }),
+        "line-semicolon" => Some(CommentStyle::Line {
+            marker: ";",
+            preserve_shebang: false,
+        }),
+        "line-double-dash" => Some(CommentStyle::Line {
+            marker: "--",
+            preserve_shebang: false,
+        }),
+        "slash-star" => Some(CommentStyle::Block {
+            start: "/*",
+            end: "*/",
+        }),
+        "slash-comments" => Some(CommentStyle::LineAndBlock {
+            line: "//",
+            block_start: "/*",
+            block_end: "*/",
+        }),
+        "html-comments" => Some(CommentStyle::Block {
+            start: "<!--",
+            end: "-->",
+        }),
+        _ => None,
+    }
+}
+
+fn remove_lexical_comments(
+    source: &str,
+    style: CommentStyle,
+    rel: &Path,
+) -> Result<String, TransformError> {
+    let mut bytes = source.as_bytes().to_vec();
+    let source_bytes = source.as_bytes();
+    let mut state = None;
+    let mut line_start = 0usize;
+    let mut idx = 0usize;
+    while idx < source_bytes.len() {
+        if source_bytes[idx] == b'\n' {
+            line_start = idx + 1;
+        }
+
+        match &mut state {
+            Some(StringState::Single { quote, escaped }) => {
+                if *escaped {
+                    *escaped = false;
+                } else if source_bytes[idx] == b'\\' {
+                    *escaped = true;
+                } else if source_bytes[idx] == *quote {
+                    state = None;
+                }
+                idx += 1;
+                continue;
+            }
+            Some(StringState::Triple { quote }) => {
+                if starts_with_bytes(source_bytes, idx, &[*quote, *quote, *quote]) {
+                    state = None;
+                    idx += 3;
+                } else {
+                    idx += 1;
+                }
+                continue;
+            }
+            None => {}
+        }
+
+        if let Some((line_marker, preserve_shebang)) = style.line_marker() {
+            if preserve_shebang && idx == line_start && starts_with_bytes(source_bytes, idx, b"#!")
+            {
+                idx = skip_to_line_end(source_bytes, idx);
+                continue;
+            }
+            if starts_with_bytes(source_bytes, idx, line_marker.as_bytes()) {
+                let end = skip_to_line_end(source_bytes, idx);
+                replace_with_spaces(&mut bytes, idx, end);
+                idx = end;
+                continue;
+            }
+        }
+
+        if let Some((block_start, block_end)) = style.block_markers() {
+            if starts_with_bytes(source_bytes, idx, block_start.as_bytes()) {
+                let Some(end) = find_block_end(source_bytes, idx + block_start.len(), block_end)
+                else {
+                    return Err(TransformError::SyntaxRejected {
+                        path: display_rel(rel),
+                        message: format!("unterminated lexical block comment for {block_start}"),
+                    });
+                };
+                replace_with_spaces(&mut bytes, idx, end);
+                idx = end;
+                continue;
+            }
+        }
+
+        if matches!(source_bytes[idx], b'\'' | b'"' | b'`') {
+            let quote = source_bytes[idx];
+            if quote != b'`' && starts_with_bytes(source_bytes, idx, &[quote, quote, quote]) {
+                state = Some(StringState::Triple { quote });
+                idx += 3;
+            } else {
+                state = Some(StringState::Single {
+                    quote,
+                    escaped: false,
+                });
+                idx += 1;
+            }
+            continue;
+        }
+
+        idx += 1;
+    }
+    Ok(String::from_utf8(bytes).expect("comments are replaced with ASCII spaces"))
+}
+
+impl CommentStyle {
+    fn line_marker(self) -> Option<(&'static str, bool)> {
+        match self {
+            CommentStyle::Line {
+                marker,
+                preserve_shebang,
+            } => Some((marker, preserve_shebang)),
+            CommentStyle::LineAndBlock { line, .. } => Some((line, false)),
+            CommentStyle::Block { .. } => None,
+        }
+    }
+
+    fn block_markers(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            CommentStyle::Block { start, end } => Some((start, end)),
+            CommentStyle::LineAndBlock {
+                block_start,
+                block_end,
+                ..
+            } => Some((block_start, block_end)),
+            CommentStyle::Line { .. } => None,
+        }
+    }
+}
+
+fn starts_with_bytes(source: &[u8], idx: usize, marker: &[u8]) -> bool {
+    source
+        .get(idx..idx + marker.len())
+        .is_some_and(|candidate| candidate == marker)
+}
+
+fn skip_to_line_end(source: &[u8], start: usize) -> usize {
+    source[start..]
+        .iter()
+        .position(|byte| *byte == b'\n' || *byte == b'\r')
+        .map_or(source.len(), |offset| start + offset)
+}
+
+fn find_block_end(source: &[u8], start: usize, marker: &str) -> Option<usize> {
+    let marker = marker.as_bytes();
+    let mut idx = start;
+    while idx < source.len() {
+        if starts_with_bytes(source, idx, marker) {
+            return Some(idx + marker.len());
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn replace_with_spaces(bytes: &mut [u8], start: usize, end: usize) {
+    for byte in &mut bytes[start..end] {
+        if *byte != b'\n' && *byte != b'\r' {
+            *byte = b' ';
+        }
+    }
+}
+
 fn replace_ranges_with_space(source: &str, ranges: &[(usize, usize)]) -> String {
     let mut bytes = source.as_bytes().to_vec();
     for (start, end) in ranges {
@@ -1018,6 +1262,37 @@ fn rust_module_path(source_root: &Path, file: &Path) -> Result<Vec<String>, Tran
     Ok(parts)
 }
 
+fn flattened_file_name(rel: &Path) -> Result<String, TransformError> {
+    let components = normal_components_checked(rel)?;
+    if components.is_empty() {
+        return Err(TransformError::InvalidRelativePath(display_rel(rel)));
+    }
+    Ok(components
+        .iter()
+        .map(|component| {
+            format!(
+                "{}-{}",
+                component.len(),
+                encode_filename_component(component)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("__"))
+}
+
+fn encode_filename_component(component: &str) -> String {
+    let mut encoded = String::new();
+    for byte in component.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 fn is_rust_entrypoint(rel: &Path) -> bool {
     rel.file_name()
         .and_then(|name| name.to_str())
@@ -1059,6 +1334,22 @@ fn normal_components(path: &Path) -> Vec<String> {
         .collect()
 }
 
+fn normal_components_checked(path: &Path) -> Result<Vec<String>, TransformError> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                let Some(value) = value.to_str() else {
+                    return Err(TransformError::InvalidRelativePath(display_rel(path)));
+                };
+                parts.push(value.to_owned());
+            }
+            _ => return Err(TransformError::InvalidRelativePath(display_rel(path))),
+        }
+    }
+    Ok(parts)
+}
+
 fn parser_matches_file(parser: &ParserContract, rel: &Path) -> bool {
     let extension = rel.extension().and_then(|ext| ext.to_str());
     match (parser.language.as_str(), parser.adapter.as_str()) {
@@ -1070,8 +1361,21 @@ fn parser_matches_file(parser: &ParserContract, rel: &Path) -> bool {
         ("markdown", "pulldown_cmark") => {
             extension.is_some_and(|ext| ext == "md" || ext == "markdown")
         }
-        _ => false,
+        _ => explicit_parser_match(&parser.language, rel),
     }
+}
+
+fn explicit_parser_match(language: &str, rel: &Path) -> bool {
+    if let Some(extension) = language.strip_prefix("ext:") {
+        return extension_matches(rel, extension);
+    }
+    if let Some(name) = language.strip_prefix("name:") {
+        return rel
+            .file_name()
+            .and_then(|file_name| file_name.to_str())
+            .is_some_and(|file_name| file_name == name);
+    }
+    false
 }
 
 fn extension_matches(rel: &Path, extension: &str) -> bool {

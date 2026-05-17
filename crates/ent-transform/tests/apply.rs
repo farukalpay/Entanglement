@@ -189,6 +189,66 @@ fn unsupported_files_fail_closed_without_target_writes() {
 }
 
 #[test]
+fn explicit_lexical_adapters_remove_comments_without_inferred_language_rules() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::create_dir_all(repo.path().join("scripts")).expect("scripts");
+    fs::write(
+        repo.path().join("scripts/tool.py"),
+        "#!/usr/bin/env python3\nvalue = \"# keep string\" # drop python\nblock = \"\"\"# keep triple\"\"\"\n",
+    )
+    .expect("python");
+    fs::write(
+        repo.path().join("CMakeLists.txt"),
+        "set(VALUE \"# keep cmake string\") # drop cmake\n",
+    )
+    .expect("cmake");
+
+    let cert = elaborate_source(LEXICAL_PROGRAM).expect("program elaborates");
+    let report = apply_certificate(&cert, repo.path()).expect("apply succeeds");
+
+    assert_eq!(report.changed_files.len(), 2);
+    let python = fs::read_to_string(repo.path().join("scripts/tool.py")).expect("python");
+    assert!(python.starts_with("#!/usr/bin/env python3"));
+    assert!(python.contains("\"# keep string\""));
+    assert!(python.contains("\"\"\"# keep triple\"\"\""));
+    assert!(!python.contains("drop python"));
+    let cmake = fs::read_to_string(repo.path().join("CMakeLists.txt")).expect("cmake");
+    assert!(cmake.contains("\"# keep cmake string\""));
+    assert!(!cmake.contains("drop cmake"));
+}
+
+#[test]
+fn flatten_files_copies_selected_files_to_one_folder_without_deleting_sources() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::create_dir_all(repo.path().join("pkg")).expect("pkg");
+    fs::write(repo.path().join("main.py"), "print('main')\n").expect("main");
+    fs::write(repo.path().join("pkg/util.py"), "print('util')\n").expect("util");
+    fs::write(repo.path().join("README.md"), "# untouched\n").expect("readme");
+
+    let cert = elaborate_source(FLATTEN_FILES_PROGRAM).expect("program elaborates");
+    let report = apply_certificate(&cert, repo.path()).expect("apply succeeds");
+
+    assert_eq!(report.changed_files.len(), 2);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("main.py")).expect("main"),
+        "print('main')\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("pkg/util.py")).expect("util"),
+        "print('util')\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("flat/7-main.py")).expect("flat main"),
+        "print('main')\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("flat/3-pkg__7-util.py")).expect("flat util"),
+        "print('util')\n"
+    );
+    assert!(!repo.path().join("flat/9-README.md").exists());
+}
+
+#[test]
 fn validator_failure_rolls_back_target_writes() {
     let repo = tempfile::tempdir().expect("repo");
     fs::write(repo.path().join("README.md"), "keep\nlegacy\n").expect("readme");
@@ -383,6 +443,69 @@ world FailingValidatorCleanup(agent Operator) {
   proof validator_safe {
     let row = row validator fail
     let fact = rule validator_admissible_from_validator(row)
+    qed fact
+  }
+}
+"#;
+
+const LEXICAL_PROGRAM: &str = r#"
+world LexicalCleanup(agent Operator) {
+  state tree : Resource
+  workspace repo uses filesystem write evidence repo_boundary
+  parser py language ext:py via line-hash-shebang evidence py_comment_contract
+  parser cmake_lists language name:CMakeLists.txt via line-hash evidence cmake_comment_contract
+  select scripts = files where parsed_by(py, cmake_lists) evidence explicit_parser_scope
+  transform strip_comments remove_comments on scripts evidence lexical_comment_ranges
+  theorem py_parser : parser_admissible(py)
+  theorem cmake_parser : parser_admissible(cmake_lists)
+  theorem scripts_selection : selection_admissible(scripts)
+  theorem comments_safe : transform_admissible(strip_comments)
+  proof py_parser {
+    let row = row parser py
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmake_parser {
+    let row = row parser cmake_lists
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof scripts_selection {
+    let row = row selection scripts
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof comments_safe {
+    let row = row transform strip_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}
+"#;
+
+const FLATTEN_FILES_PROGRAM: &str = r#"
+world FlattenFiles(agent Operator) {
+  state tree : Resource
+  workspace repo uses filesystem write evidence repo_boundary
+  parser py language ext:py via line-hash-shebang evidence py_comment_contract
+  select scripts = files where parsed_by(py) evidence explicit_parser_scope
+  transform collect flatten_files on scripts into "flat" evidence path_encoded_copy
+  theorem py_parser : parser_admissible(py)
+  theorem scripts_selection : selection_admissible(scripts)
+  theorem collect_safe : transform_admissible(collect)
+  proof py_parser {
+    let row = row parser py
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof scripts_selection {
+    let row = row selection scripts
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof collect_safe {
+    let row = row transform collect
+    let fact = rule transform_admissible_from_transform(row)
     qed fact
   }
 }

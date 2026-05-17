@@ -880,6 +880,18 @@ fn check_transform_shape(transform: &ent_core::TransformContract) -> Result<(), 
                 );
             }
         }
+        "flatten_files" => {
+            if !matches!(transform.target, TransformTarget::Selection(_))
+                || transform.destination.as_deref().is_none_or(str::is_empty)
+                || transform.predicate.is_some()
+                || transform.replacement.is_some()
+            {
+                return invalid_transform(
+                    transform,
+                    "flatten_files requires a selection target and destination",
+                );
+            }
+        }
         "delete_files" => {
             if transform.destination.is_some()
                 || transform.predicate.is_some()
@@ -1310,13 +1322,52 @@ fn invalid_transform(
 }
 
 fn supported_parser_adapter(language: &str, adapter: &str) -> bool {
-    matches!(
+    if language.trim().is_empty() {
+        return false;
+    }
+    if matches!(
         (language, adapter),
         ("rust", "tree-sitter")
             | ("c", "tree-sitter")
             | ("cpp", "tree-sitter")
             | ("ent", "native")
             | ("markdown", "pulldown_cmark")
+    ) {
+        return true;
+    }
+    if !(language.starts_with("ext:") || language.starts_with("name:")) {
+        return false;
+    }
+    explicit_file_matcher(language) && lexical_comment_adapter(adapter)
+}
+
+fn explicit_file_matcher(language: &str) -> bool {
+    match language.split_once(':') {
+        Some(("ext", body)) => explicit_matcher_body(body.trim_start_matches('.')),
+        Some(("name", body)) => explicit_matcher_body(body),
+        _ => false,
+    }
+}
+
+fn explicit_matcher_body(body: &str) -> bool {
+    !body.is_empty()
+        && !body.contains('/')
+        && !body.contains('\\')
+        && !body.contains('\0')
+        && !body.chars().any(char::is_whitespace)
+}
+
+fn lexical_comment_adapter(adapter: &str) -> bool {
+    matches!(
+        adapter,
+        "line-hash"
+            | "line-hash-shebang"
+            | "line-slash"
+            | "line-semicolon"
+            | "line-double-dash"
+            | "slash-star"
+            | "slash-comments"
+            | "html-comments"
     )
 }
 

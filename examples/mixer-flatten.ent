@@ -1,0 +1,162 @@
+world MixerFlatten(agent Operator) {
+  state tree : Resource
+
+  workspace repo uses filesystem write evidence mixer_repo_boundary
+  parser py language ext:py via line-hash-shebang evidence py_lexical_contract
+  parser sh language ext:sh via line-hash-shebang evidence sh_lexical_contract
+  parser cmake language ext:cmake via line-hash evidence cmake_lexical_contract
+  parser cmake_lists language name:CMakeLists.txt via line-hash evidence cmake_lists_contract
+  parser c_src language ext:c via slash-comments evidence c_lexical_contract
+  parser h_src language ext:h via slash-comments evidence h_lexical_contract
+  parser cc_src language ext:cc via slash-comments evidence cc_lexical_contract
+  parser cpp_src language ext:cpp via slash-comments evidence cpp_lexical_contract
+  parser hh_src language ext:hh via slash-comments evidence hh_lexical_contract
+  parser hpp_src language ext:hpp via slash-comments evidence hpp_lexical_contract
+  parser inl_src language ext:inl via slash-comments evidence inl_lexical_contract
+  parser mm_src language ext:mm via slash-comments evidence mm_lexical_contract
+  parser objc_src language ext:m via slash-comments evidence objc_lexical_contract
+  parser cu_src language ext:cu via slash-comments evidence cuda_lexical_contract
+  parser glsl_src language ext:glsl via slash-comments evidence glsl_lexical_contract
+  parser osl_src language ext:osl via slash-comments evidence osl_lexical_contract
+  parser msl_src language ext:msl via slash-comments evidence msl_lexical_contract
+  parser toml_cfg language ext:toml via line-hash evidence toml_lexical_contract
+  parser yaml_cfg language ext:yaml via line-hash evidence yaml_lexical_contract
+  parser yml_cfg language ext:yml via line-hash evidence yml_lexical_contract
+
+  select source_code = files where parsed_by(py, sh, cmake, cmake_lists, c_src, h_src, cc_src, cpp_src, hh_src, hpp_src, inl_src, mm_src, objc_src, cu_src, glsl_src, osl_src, msl_src, toml_cfg, yaml_cfg, yml_cfg) evidence mixer_code_scope
+  transform collect flatten_files on source_code into "_ent_mixer_flat" evidence path_encoded_flatten
+
+  theorem py_parser : parser_admissible(py)
+  theorem sh_parser : parser_admissible(sh)
+  theorem cmake_parser : parser_admissible(cmake)
+  theorem cmake_lists_parser : parser_admissible(cmake_lists)
+  theorem c_parser : parser_admissible(c_src)
+  theorem h_parser : parser_admissible(h_src)
+  theorem cc_parser : parser_admissible(cc_src)
+  theorem cpp_parser : parser_admissible(cpp_src)
+  theorem hh_parser : parser_admissible(hh_src)
+  theorem hpp_parser : parser_admissible(hpp_src)
+  theorem inl_parser : parser_admissible(inl_src)
+  theorem mm_parser : parser_admissible(mm_src)
+  theorem objc_parser : parser_admissible(objc_src)
+  theorem cu_parser : parser_admissible(cu_src)
+  theorem glsl_parser : parser_admissible(glsl_src)
+  theorem osl_parser : parser_admissible(osl_src)
+  theorem msl_parser : parser_admissible(msl_src)
+  theorem toml_parser : parser_admissible(toml_cfg)
+  theorem yaml_parser : parser_admissible(yaml_cfg)
+  theorem yml_parser : parser_admissible(yml_cfg)
+  theorem source_selection : selection_admissible(source_code)
+  theorem collect_safe : transform_admissible(collect)
+
+  proof py_parser {
+    let row = row parser py
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof sh_parser {
+    let row = row parser sh
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmake_parser {
+    let row = row parser cmake
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmake_lists_parser {
+    let row = row parser cmake_lists
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof c_parser {
+    let row = row parser c_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof h_parser {
+    let row = row parser h_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cc_parser {
+    let row = row parser cc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cpp_parser {
+    let row = row parser cpp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hh_parser {
+    let row = row parser hh_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hpp_parser {
+    let row = row parser hpp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof inl_parser {
+    let row = row parser inl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof mm_parser {
+    let row = row parser mm_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof objc_parser {
+    let row = row parser objc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cu_parser {
+    let row = row parser cu_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof glsl_parser {
+    let row = row parser glsl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof osl_parser {
+    let row = row parser osl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof msl_parser {
+    let row = row parser msl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof toml_parser {
+    let row = row parser toml_cfg
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof yaml_parser {
+    let row = row parser yaml_cfg
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof yml_parser {
+    let row = row parser yml_cfg
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof source_selection {
+    let row = row selection source_code
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof collect_safe {
+    let row = row transform collect
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}
