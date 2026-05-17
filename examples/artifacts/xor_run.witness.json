@@ -1,0 +1,29 @@
+{
+  "artifact": "xor_data_artifact",
+  "executor": "local_python",
+  "lowering": "xor_pytorch",
+  "metrics": {
+    "final_loss": 0.68297184,
+    "first_loss": 0.6938469
+  },
+  "observed": {
+    "batch": 4,
+    "dataset_digest": "sha256:db924bc71be2ca48c0fd2b067e06c51ada1baec7d50757f8a7674e1015333c6a",
+    "device": "cpu",
+    "learning_rate": 0.2,
+    "network_access": "off",
+    "optimizer": "sgd",
+    "seed": 1337,
+    "steps": 20,
+    "trace_ops": [
+      "torch.matmul",
+      "torch.add",
+      "torch.nn.functional.relu",
+      "torch.matmul",
+      "torch.add",
+      "torch.nn.functional.cross_entropy"
+    ]
+  },
+  "schema": "ent.runtime-witness.v1",
+  "training": "xor_train"
+}

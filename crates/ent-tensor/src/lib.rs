@@ -1,12 +1,15 @@
 use anyhow::{Context, Result};
-use ent_core::{Certificate, ModelContract, TensorContract, TrainingContract};
+use ent_core::{
+    ArtifactContract, Certificate, ExecutorContract, LoweringContract, ModelContract,
+    TensorContract, TrainingContract,
+};
 use ent_elab::elaborate_source;
 use ent_kernel::verify;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -52,6 +55,94 @@ pub struct TensorRunReport {
     pub elapsed_ms: f64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct ArtifactVerificationReport {
+    pub world: String,
+    pub artifact: String,
+    pub manifest: String,
+    pub canonical: String,
+    pub expected_digest: String,
+    pub actual_digest: String,
+    pub tensors: Vec<TensorManifestCheck>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TensorManifestCheck {
+    pub name: String,
+    pub shape: Vec<usize>,
+    pub dtype: String,
+    pub layout: String,
+    pub tensor_digest: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct WitnessVerificationReport {
+    pub world: String,
+    pub witness: String,
+    pub training: String,
+    pub artifact: String,
+    pub lowering: String,
+    pub executor: String,
+    pub dataset_digest: String,
+    pub trace_ops: Vec<String>,
+    pub requirements: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BindingReport {
+    pub world: String,
+    pub artifact: String,
+    pub training: String,
+    pub lowering: String,
+    pub executor: String,
+    pub framework: String,
+    pub output: PathBuf,
+    pub expected_digest: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TensorManifest {
+    pub schema: String,
+    pub canonical: String,
+    pub tensors: BTreeMap<String, TensorManifestEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TensorManifestEntry {
+    pub shape: Vec<usize>,
+    pub dtype: String,
+    pub layout: String,
+    pub sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeWitness {
+    pub schema: String,
+    pub training: String,
+    pub artifact: String,
+    pub lowering: String,
+    pub executor: String,
+    pub observed: WitnessObserved,
+    pub metrics: BTreeMap<String, f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessObserved {
+    pub dataset_digest: String,
+    pub trace_ops: Vec<String>,
+    pub optimizer: String,
+    pub learning_rate: f64,
+    pub steps: u32,
+    pub batch: u32,
+    pub device: String,
+    pub network_access: String,
+    pub seed: u64,
+}
+
 #[derive(Debug, Error)]
 pub enum TensorRuntimeError {
     #[error("source does not declare a training contract")]
@@ -92,6 +183,41 @@ pub enum TensorRuntimeError {
         expected: String,
         actual: String,
     },
+    #[error("source does not declare an artifact contract")]
+    MissingArtifact,
+    #[error("source does not declare a lowering contract")]
+    MissingLowering,
+    #[error("source does not declare an executor contract")]
+    MissingExecutor,
+    #[error("source does not declare a witness contract")]
+    MissingWitness,
+    #[error("artifact manifest digest mismatch for {name}: expected {expected}, got {actual}")]
+    ArtifactDigestMismatch {
+        name: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("artifact manifest is missing tensor: {0}")]
+    ManifestMissingTensor(String),
+    #[error(
+        "artifact manifest tensor {name} has {field} mismatch: expected {expected}, got {actual}"
+    )]
+    ManifestTensorMismatch {
+        name: String,
+        field: &'static str,
+        expected: String,
+        actual: String,
+    },
+    #[error("runtime witness mismatch for {field}: expected {expected}, got {actual}")]
+    WitnessMismatch {
+        field: &'static str,
+        expected: String,
+        actual: String,
+    },
+    #[error("runtime witness requirement failed: {0}")]
+    WitnessRequirementFailed(String),
+    #[error("runtime witness requirement is malformed: {0}")]
+    MalformedRequirement(String),
 }
 
 pub fn run_tensor_benchmark(path: &Path, options: TensorBenchOptions) -> Result<TensorBenchReport> {
@@ -149,6 +275,654 @@ pub fn run_tensor_source(source: &str, options: TensorBenchOptions) -> Result<Te
         parameter_count: model.parameters.len(),
         source_digest: sha256_uri(source.as_bytes()),
     })
+}
+
+pub fn verify_artifact_manifest(
+    ent_path: &Path,
+    manifest_path: Option<&Path>,
+) -> Result<ArtifactVerificationReport> {
+    let cert = load_verified_certificate(ent_path)?;
+    let artifact = cert
+        .artifacts
+        .first()
+        .ok_or(TensorRuntimeError::MissingArtifact)?;
+    verify_artifact_manifest_for(&cert, ent_path, artifact, manifest_path)
+}
+
+pub fn verify_witness(ent_path: &Path, witness_path: &Path) -> Result<WitnessVerificationReport> {
+    let cert = load_verified_certificate(ent_path)?;
+    let witness_contract = cert
+        .witnesses
+        .first()
+        .ok_or(TensorRuntimeError::MissingWitness)?;
+    let artifact = find_artifact(&cert, &witness_contract.artifact)?;
+    let lowering = find_lowering(&cert, &witness_contract.lowering)?;
+    let executor = find_executor(&cert, &witness_contract.executor)?;
+    let training = find_training(&cert, &witness_contract.training)?;
+    let model = find_model(&cert, &training.model)?;
+
+    verify_artifact_manifest_for(&cert, ent_path, artifact, None)?;
+
+    let witness_bytes = fs::read(witness_path)
+        .with_context(|| format!("failed to read witness {}", witness_path.display()))?;
+    let witness: RuntimeWitness =
+        serde_json::from_slice(&witness_bytes).context("failed to parse runtime witness")?;
+    require_equal("schema", "ent.runtime-witness.v1", &witness.schema)?;
+    let expected_trace_ops = expected_lowered_trace(model, lowering)?;
+
+    require_equal("training", &witness_contract.training, &witness.training)?;
+    require_equal("artifact", &witness_contract.artifact, &witness.artifact)?;
+    require_equal("lowering", &witness_contract.lowering, &witness.lowering)?;
+    require_equal("executor", &witness_contract.executor, &witness.executor)?;
+    require_equal(
+        "training.artifact",
+        &artifact.name,
+        training.artifact.as_deref().unwrap_or_default(),
+    )?;
+    require_equal(
+        "dataset_digest",
+        &artifact.digest,
+        &witness.observed.dataset_digest,
+    )?;
+    require_equal(
+        "optimizer",
+        &training.optimizer,
+        &witness.observed.optimizer,
+    )?;
+    require_equal(
+        "learning_rate",
+        &canonical_f64(training.learning_rate),
+        &canonical_f64(witness.observed.learning_rate),
+    )?;
+    require_equal(
+        "steps",
+        &training.steps.to_string(),
+        &witness.observed.steps.to_string(),
+    )?;
+    require_equal(
+        "batch",
+        &training.batch.to_string(),
+        &witness.observed.batch.to_string(),
+    )?;
+    require_equal("device", &executor.device, &witness.observed.device)?;
+    require_equal(
+        "network_access",
+        &executor.network,
+        &witness.observed.network_access,
+    )?;
+    require_equal(
+        "seed",
+        &executor.seed.to_string(),
+        &witness.observed.seed.to_string(),
+    )?;
+    if witness.observed.trace_ops != expected_trace_ops {
+        return Err(TensorRuntimeError::WitnessMismatch {
+            field: "trace_ops",
+            expected: expected_trace_ops.join(","),
+            actual: witness.observed.trace_ops.join(","),
+        }
+        .into());
+    }
+    for requirement in &witness_contract.requirements {
+        if !evaluate_requirement(requirement, &witness.metrics)? {
+            return Err(TensorRuntimeError::WitnessRequirementFailed(requirement.clone()).into());
+        }
+    }
+
+    Ok(WitnessVerificationReport {
+        world: cert.world.clone(),
+        witness: witness_contract.name.clone(),
+        training: training.name.clone(),
+        artifact: artifact.name.clone(),
+        lowering: lowering.name.clone(),
+        executor: executor.name.clone(),
+        dataset_digest: artifact.digest.clone(),
+        trace_ops: expected_trace_ops,
+        requirements: witness_contract.requirements.clone(),
+    })
+}
+
+pub fn generate_python_binding(
+    ent_path: &Path,
+    output: &Path,
+    framework: &str,
+) -> Result<BindingReport> {
+    let cert = load_verified_certificate(ent_path)?;
+    let witness = cert
+        .witnesses
+        .first()
+        .ok_or(TensorRuntimeError::MissingWitness)?;
+    let artifact = find_artifact(&cert, &witness.artifact)?;
+    let lowering = find_lowering(&cert, &witness.lowering)?;
+    let executor = find_executor(&cert, &witness.executor)?;
+    let training = find_training(&cert, &witness.training)?;
+    let model = find_model(&cert, &training.model)?;
+    if lowering.framework != framework {
+        return Err(TensorRuntimeError::WitnessMismatch {
+            field: "framework",
+            expected: lowering.framework.clone(),
+            actual: framework.to_owned(),
+        }
+        .into());
+    }
+    let tensor_specs = binding_tensor_specs(&cert, artifact)?;
+    let expected_trace_ops = expected_lowered_trace(model, lowering)?;
+    let module = python_binding_module(
+        &cert,
+        artifact,
+        lowering,
+        executor,
+        training,
+        witness,
+        &tensor_specs,
+        &expected_trace_ops,
+    )?;
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create binding dir {}", parent.display()))?;
+    }
+    fs::write(output, module)
+        .with_context(|| format!("failed to write binding {}", output.display()))?;
+    Ok(BindingReport {
+        world: cert.world.clone(),
+        artifact: artifact.name.clone(),
+        training: training.name.clone(),
+        lowering: lowering.name.clone(),
+        executor: executor.name.clone(),
+        framework: framework.to_owned(),
+        output: output.to_path_buf(),
+        expected_digest: artifact.digest.clone(),
+    })
+}
+
+fn load_verified_certificate(path: &Path) -> Result<Certificate> {
+    let source = fs::read_to_string(path)
+        .with_context(|| format!("failed to read tensor source {}", path.display()))?;
+    let cert = elaborate_source(&source).context("tensor source failed to elaborate")?;
+    verify(&cert).context("tensor certificate rejected by kernel")?;
+    Ok(cert)
+}
+
+fn verify_artifact_manifest_for(
+    cert: &Certificate,
+    ent_path: &Path,
+    artifact: &ArtifactContract,
+    manifest_path: Option<&Path>,
+) -> Result<ArtifactVerificationReport> {
+    let manifest_path = manifest_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| resolve_ent_relative(ent_path, &artifact.manifest));
+    let manifest_bytes = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
+    let manifest: TensorManifest =
+        serde_json::from_slice(&manifest_bytes).context("failed to parse tensor manifest")?;
+    if manifest.schema != "ent.tensor-manifest.v1" {
+        return Err(TensorRuntimeError::ManifestTensorMismatch {
+            name: artifact.name.clone(),
+            field: "schema",
+            expected: "ent.tensor-manifest.v1".to_owned(),
+            actual: manifest.schema.clone(),
+        }
+        .into());
+    }
+    if manifest.canonical != artifact.canonical {
+        return Err(TensorRuntimeError::ManifestTensorMismatch {
+            name: artifact.name.clone(),
+            field: "canonical",
+            expected: artifact.canonical.clone(),
+            actual: manifest.canonical.clone(),
+        }
+        .into());
+    }
+    let actual_digest = sha256_uri(&canonical_json_bytes(&manifest)?);
+    if actual_digest != artifact.digest {
+        return Err(TensorRuntimeError::ArtifactDigestMismatch {
+            name: artifact.name.clone(),
+            expected: artifact.digest.clone(),
+            actual: actual_digest,
+        }
+        .into());
+    }
+
+    let tensors = cert
+        .tensors
+        .iter()
+        .map(|tensor| (tensor.name.as_str(), tensor))
+        .collect::<BTreeMap<_, _>>();
+    let mut checks = Vec::with_capacity(artifact.tensors.len());
+    for name in &artifact.tensors {
+        let contract = tensors
+            .get(name.as_str())
+            .ok_or_else(|| TensorRuntimeError::MissingTensor(name.clone()))?;
+        let entry = manifest
+            .tensors
+            .get(name)
+            .ok_or_else(|| TensorRuntimeError::ManifestMissingTensor(name.clone()))?;
+        let expected_shape = concrete_shape(contract)?;
+        if entry.shape != expected_shape {
+            return Err(TensorRuntimeError::ManifestTensorMismatch {
+                name: name.clone(),
+                field: "shape",
+                expected: format!("{expected_shape:?}"),
+                actual: format!("{:?}", entry.shape),
+            }
+            .into());
+        }
+        if entry.dtype != contract.dtype {
+            return Err(TensorRuntimeError::ManifestTensorMismatch {
+                name: name.clone(),
+                field: "dtype",
+                expected: contract.dtype.clone(),
+                actual: entry.dtype.clone(),
+            }
+            .into());
+        }
+        if entry.layout != contract.layout {
+            return Err(TensorRuntimeError::ManifestTensorMismatch {
+                name: name.clone(),
+                field: "layout",
+                expected: contract.layout.clone(),
+                actual: entry.layout.clone(),
+            }
+            .into());
+        }
+        if !valid_sha256_uri(&entry.sha256) {
+            return Err(TensorRuntimeError::ManifestTensorMismatch {
+                name: name.clone(),
+                field: "sha256",
+                expected: "sha256:<digest>".to_owned(),
+                actual: entry.sha256.clone(),
+            }
+            .into());
+        }
+        checks.push(TensorManifestCheck {
+            name: name.clone(),
+            shape: entry.shape.clone(),
+            dtype: entry.dtype.clone(),
+            layout: entry.layout.clone(),
+            tensor_digest: entry.sha256.clone(),
+        });
+    }
+
+    Ok(ArtifactVerificationReport {
+        world: cert.world.clone(),
+        artifact: artifact.name.clone(),
+        manifest: manifest_path.display().to_string(),
+        canonical: manifest.canonical,
+        expected_digest: artifact.digest.clone(),
+        actual_digest,
+        tensors: checks,
+    })
+}
+
+fn binding_tensor_specs(
+    cert: &Certificate,
+    artifact: &ArtifactContract,
+) -> Result<BTreeMap<String, TensorManifestEntry>> {
+    let tensors = cert
+        .tensors
+        .iter()
+        .map(|tensor| (tensor.name.as_str(), tensor))
+        .collect::<BTreeMap<_, _>>();
+    artifact
+        .tensors
+        .iter()
+        .map(|name| {
+            let tensor = tensors
+                .get(name.as_str())
+                .ok_or_else(|| TensorRuntimeError::MissingTensor(name.clone()))?;
+            Ok((
+                name.clone(),
+                TensorManifestEntry {
+                    shape: concrete_shape(tensor)?,
+                    dtype: tensor.dtype.clone(),
+                    layout: tensor.layout.clone(),
+                    sha256: String::new(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn expected_lowered_trace(
+    model: &ModelContract,
+    lowering: &LoweringContract,
+) -> Result<Vec<String>> {
+    let mapping = lowering
+        .mappings
+        .iter()
+        .map(|row| {
+            let (op, targets) = row
+                .split_once('=')
+                .ok_or_else(|| TensorRuntimeError::MalformedOp(row.clone()))?;
+            let targets = targets
+                .split('+')
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            Ok((op.trim().to_owned(), targets))
+        })
+        .collect::<Result<BTreeMap<_, _>, TensorRuntimeError>>()?;
+    let mut trace = Vec::new();
+    for op in &model.ops {
+        let parsed = ParsedOp::parse(op)?;
+        let Some(targets) = mapping.get(&parsed.name) else {
+            return Err(TensorRuntimeError::UnsupportedOp(parsed.name).into());
+        };
+        trace.extend(targets.iter().cloned());
+    }
+    Ok(trace)
+}
+
+fn python_binding_module(
+    cert: &Certificate,
+    artifact: &ArtifactContract,
+    lowering: &LoweringContract,
+    executor: &ExecutorContract,
+    training: &TrainingContract,
+    witness: &ent_core::WitnessContract,
+    tensor_specs: &BTreeMap<String, TensorManifestEntry>,
+    expected_trace_ops: &[String],
+) -> Result<String> {
+    let constants = serde_json::json!({
+        "world": &cert.world,
+        "artifact": &artifact.name,
+        "artifact_digest": &artifact.digest,
+        "canonical": &artifact.canonical,
+        "tensor_specs": tensor_specs,
+        "training": {
+            "name": &training.name,
+            "optimizer": &training.optimizer,
+            "learning_rate": training.learning_rate,
+            "steps": training.steps,
+            "batch": training.batch,
+        },
+        "lowering": {
+            "name": &lowering.name,
+            "framework": &lowering.framework,
+            "trace_ops": expected_trace_ops,
+            "tolerance": lowering.tolerance,
+        },
+        "executor": {
+            "name": &executor.name,
+            "device": &executor.device,
+            "network_access": &executor.network,
+            "seed": executor.seed,
+            "deterministic": executor.deterministic,
+        },
+        "witness": {
+            "name": &witness.name,
+            "requirements": &witness.requirements,
+        },
+    });
+    let constants = serde_json::to_string_pretty(&constants)?;
+    let mut module = String::new();
+    module.push_str(
+        r#"# Generated by entc bind. Do not edit by hand.
+import hashlib
+import json
+from pathlib import Path
+
+CONTRACT = "#,
+    );
+    module.push_str(&constants);
+    module.push_str(
+        r#"
+
+
+def _canonical_bytes(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _sha256_uri(payload):
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _array_bytes(value):
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().contiguous().numpy()
+    if hasattr(value, "tobytes"):
+        return value.tobytes()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _shape(value):
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().contiguous().numpy()
+    if hasattr(value, "shape"):
+        return [int(dim) for dim in value.shape]
+    if isinstance(value, (list, tuple)):
+        rows = len(value)
+        if rows and isinstance(value[0], (list, tuple)):
+            return [rows, len(value[0])]
+        return [rows]
+    return []
+
+
+def tensor_digest(value, dtype, layout):
+    payload = {
+        "schema": "ent.tensor-digest.v1",
+        "shape": _shape(value),
+        "dtype": dtype,
+        "layout": layout,
+        "data_hex": _array_bytes(value).hex(),
+    }
+    return _sha256_uri(_canonical_bytes(payload))
+
+
+class ContractSession:
+    def __init__(self):
+        self._bound = {}
+        self._manifest = None
+
+    def bind_tensors(self, **tensors):
+        entries = {}
+        for name, spec in CONTRACT["tensor_specs"].items():
+            if name not in tensors:
+                raise RuntimeError(f"missing tensor binding: {name}")
+            value = tensors[name]
+            shape = _shape(value)
+            if shape != spec["shape"]:
+                raise RuntimeError(
+                    f"shape mismatch for {name}: expected {spec['shape']}, got {shape}"
+                )
+            entries[name] = {
+                "shape": shape,
+                "dtype": spec["dtype"],
+                "layout": spec["layout"],
+                "sha256": tensor_digest(value, spec["dtype"], spec["layout"]),
+            }
+            self._bound[name] = value
+        manifest = {
+            "schema": "ent.tensor-manifest.v1",
+            "canonical": CONTRACT["canonical"],
+            "tensors": entries,
+        }
+        digest = _sha256_uri(_canonical_bytes(manifest))
+        if digest != CONTRACT["artifact_digest"]:
+            raise RuntimeError(
+                "artifact manifest digest mismatch:\n"
+                f"expected: {CONTRACT['artifact_digest']}\n"
+                f"actual:   {digest}"
+            )
+        self._manifest = manifest
+        return manifest
+
+    def tensor(self, name):
+        if name not in self._bound:
+            raise RuntimeError(f"tensor is not bound: {name}")
+        return self._bound[name]
+
+    def assert_trace(self, trace_ops):
+        trace_ops = list(trace_ops)
+        expected = CONTRACT["lowering"]["trace_ops"]
+        if trace_ops != expected:
+            raise RuntimeError(f"trace mismatch: expected {expected}, got {trace_ops}")
+        return trace_ops
+
+    def seal_witness(self, metrics, trace_ops, output):
+        trace_ops = self.assert_trace(trace_ops)
+        witness = {
+            "schema": "ent.runtime-witness.v1",
+            "training": CONTRACT["training"]["name"],
+            "artifact": CONTRACT["artifact"],
+            "lowering": CONTRACT["lowering"]["name"],
+            "executor": CONTRACT["executor"]["name"],
+            "observed": {
+                "dataset_digest": CONTRACT["artifact_digest"],
+                "trace_ops": trace_ops,
+                "optimizer": CONTRACT["training"]["optimizer"],
+                "learning_rate": CONTRACT["training"]["learning_rate"],
+                "steps": CONTRACT["training"]["steps"],
+                "batch": CONTRACT["training"]["batch"],
+                "device": CONTRACT["executor"]["device"],
+                "network_access": CONTRACT["executor"]["network_access"],
+                "seed": CONTRACT["executor"]["seed"],
+            },
+            "metrics": dict(metrics),
+        }
+        path = Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(witness, sort_keys=True, indent=2) + "\n")
+        return witness
+
+
+def open_contract():
+    return ContractSession()
+"#,
+    );
+    Ok(module)
+}
+
+fn find_training<'a>(cert: &'a Certificate, name: &str) -> Result<&'a TrainingContract> {
+    cert.trainings
+        .iter()
+        .find(|training| training.name == name)
+        .ok_or_else(|| TensorRuntimeError::MissingTraining.into())
+}
+
+fn find_model<'a>(cert: &'a Certificate, name: &str) -> Result<&'a ModelContract> {
+    cert.models
+        .iter()
+        .find(|model| model.name == name)
+        .ok_or_else(|| TensorRuntimeError::MissingModel(name.to_owned()).into())
+}
+
+fn find_artifact<'a>(cert: &'a Certificate, name: &str) -> Result<&'a ArtifactContract> {
+    cert.artifacts
+        .iter()
+        .find(|artifact| artifact.name == name)
+        .ok_or_else(|| TensorRuntimeError::MissingArtifact.into())
+}
+
+fn find_lowering<'a>(cert: &'a Certificate, name: &str) -> Result<&'a LoweringContract> {
+    cert.lowerings
+        .iter()
+        .find(|lowering| lowering.name == name)
+        .ok_or_else(|| TensorRuntimeError::MissingLowering.into())
+}
+
+fn find_executor<'a>(cert: &'a Certificate, name: &str) -> Result<&'a ExecutorContract> {
+    cert.executors
+        .iter()
+        .find(|executor| executor.name == name)
+        .ok_or_else(|| TensorRuntimeError::MissingExecutor.into())
+}
+
+fn resolve_ent_relative(ent_path: &Path, relative: &str) -> PathBuf {
+    ent_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(relative)
+}
+
+fn concrete_shape(tensor: &TensorContract) -> Result<Vec<usize>> {
+    tensor
+        .shape
+        .iter()
+        .map(|dim| {
+            dim.parse::<usize>()
+                .map_err(|_| TensorRuntimeError::SymbolicRuntimeShape(tensor.name.clone()).into())
+        })
+        .collect()
+}
+
+fn canonical_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    let value = serde_json::to_value(value)?;
+    Ok(serde_json::to_vec(&value)?)
+}
+
+fn require_equal(field: &'static str, expected: &str, actual: &str) -> Result<()> {
+    if expected == actual {
+        Ok(())
+    } else {
+        Err(TensorRuntimeError::WitnessMismatch {
+            field,
+            expected: expected.to_owned(),
+            actual: actual.to_owned(),
+        }
+        .into())
+    }
+}
+
+fn canonical_f64(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.1}")
+    } else {
+        value.to_string()
+    }
+}
+
+fn evaluate_requirement(requirement: &str, metrics: &BTreeMap<String, f64>) -> Result<bool> {
+    let (metric, op, expected) = parse_requirement(requirement)
+        .ok_or_else(|| TensorRuntimeError::MalformedRequirement(requirement.to_owned()))?;
+    let actual = metrics
+        .get(metric)
+        .ok_or_else(|| TensorRuntimeError::WitnessRequirementFailed(requirement.to_owned()))?;
+    Ok(match op {
+        "<=" => *actual <= expected,
+        "<" => *actual < expected,
+        ">=" => *actual >= expected,
+        ">" => *actual > expected,
+        "==" => (*actual - expected).abs() <= f64::EPSILON,
+        _ => false,
+    })
+}
+
+fn parse_requirement(requirement: &str) -> Option<(&str, &str, f64)> {
+    for op in ["<=", ">=", "==", "<", ">"] {
+        if let Some((metric, value)) = requirement.split_once(op) {
+            let metric = metric.trim();
+            let value = value.trim().parse::<f64>().ok()?;
+            if metric
+                .split('.')
+                .all(|part| !part.is_empty() && valid_binding_name(part))
+                && value.is_finite()
+            {
+                return Some((metric, op, value));
+            }
+        }
+    }
+    None
+}
+
+fn valid_binding_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
+}
+
+fn valid_sha256_uri(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn backend_plan(cert: &Certificate, training: &TrainingContract) -> BackendPlanReport {

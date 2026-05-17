@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 struct Env {
     rows: BTreeSet<(RowKind, String)>,
     rocq: BTreeSet<(String, Proposition)>,
+    valid_rules: BTreeSet<(PrimitiveRule, Vec<String>)>,
 }
 
 impl Env {
@@ -20,6 +21,14 @@ impl Env {
         self.rocq.insert((module.to_owned(), proposition));
         self
     }
+
+    fn with_rule(mut self, rule: PrimitiveRule, subjects: &[&str]) -> Self {
+        self.valid_rules.insert((
+            rule,
+            subjects.iter().map(|subject| subject.to_string()).collect(),
+        ));
+        self
+    }
 }
 
 impl ProofEnvironment for Env {
@@ -30,6 +39,19 @@ impl ProofEnvironment for Env {
     fn has_rocq_artifact(&self, module: &str, proposition: &Proposition) -> bool {
         self.rocq
             .contains(&(module.to_owned(), proposition.clone()))
+    }
+
+    fn validates_rule(&self, rule: &PrimitiveRule, rows: &[(RowKind, String)]) -> bool {
+        if !matches!(
+            rule,
+            PrimitiveRule::TraceEquivalent | PrimitiveRule::WitnessSatisfiesContract
+        ) {
+            return true;
+        }
+        self.valid_rules.contains(&(
+            rule.clone(),
+            rows.iter().map(|(_, subject)| subject.clone()).collect(),
+        ))
     }
 }
 
@@ -157,6 +179,100 @@ fn accepts_rocq_checked_proof_artifact_binding() {
         check_proof("add_refines", &proposition, &script, &env).expect("Rocq proof should check");
 
     assert_eq!(report.checked_steps, 2);
+}
+
+#[test]
+fn accepts_structural_runtime_boundary_rules() {
+    let env = Env::default()
+        .with(RowKind::Witness, "xor_run")
+        .with(RowKind::Model, "xor_mlp")
+        .with(RowKind::Lowering, "xor_pytorch")
+        .with_rule(
+            PrimitiveRule::TraceEquivalent,
+            &["xor_run", "xor_mlp", "xor_pytorch"],
+        );
+    let proposition = Proposition {
+        kind: PropositionKind::TraceEquivalent,
+        subject: "xor_run".into(),
+    };
+    let script = ProofScript {
+        theorem: "xor_trace_ok".into(),
+        statements: vec![
+            ProofStatement::BindRow {
+                name: "witness".into(),
+                kind: RowKind::Witness,
+                subject: "xor_run".into(),
+            },
+            ProofStatement::BindRow {
+                name: "model".into(),
+                kind: RowKind::Model,
+                subject: "xor_mlp".into(),
+            },
+            ProofStatement::BindRow {
+                name: "lowering".into(),
+                kind: RowKind::Lowering,
+                subject: "xor_pytorch".into(),
+            },
+            ProofStatement::ApplyRule {
+                name: "fact".into(),
+                rule: PrimitiveRule::TraceEquivalent,
+                args: vec!["witness".into(), "model".into(), "lowering".into()],
+            },
+            ProofStatement::Qed {
+                value: "fact".into(),
+            },
+        ],
+    };
+
+    let report =
+        check_proof("xor_trace_ok", &proposition, &script, &env).expect("proof should check");
+
+    assert_eq!(report.checked_steps, 5);
+}
+
+#[test]
+fn rejects_structural_runtime_rule_when_rows_are_unrelated() {
+    let env = Env::default()
+        .with(RowKind::Witness, "xor_run")
+        .with(RowKind::Model, "other_model")
+        .with(RowKind::Lowering, "xor_pytorch");
+    let proposition = Proposition {
+        kind: PropositionKind::TraceEquivalent,
+        subject: "xor_run".into(),
+    };
+    let script = ProofScript {
+        theorem: "xor_trace_ok".into(),
+        statements: vec![
+            ProofStatement::BindRow {
+                name: "witness".into(),
+                kind: RowKind::Witness,
+                subject: "xor_run".into(),
+            },
+            ProofStatement::BindRow {
+                name: "model".into(),
+                kind: RowKind::Model,
+                subject: "other_model".into(),
+            },
+            ProofStatement::BindRow {
+                name: "lowering".into(),
+                kind: RowKind::Lowering,
+                subject: "xor_pytorch".into(),
+            },
+            ProofStatement::ApplyRule {
+                name: "fact".into(),
+                rule: PrimitiveRule::TraceEquivalent,
+                args: vec!["witness".into(), "model".into(), "lowering".into()],
+            },
+            ProofStatement::Qed {
+                value: "fact".into(),
+            },
+        ],
+    };
+
+    let err = check_proof("xor_trace_ok", &proposition, &script, &env)
+        .expect_err("unrelated rows must reject");
+
+    assert!(matches!(err, ProofCheckError::RuleRelationRejected { .. }));
 }
 
 fn script(theorem: &str, kind: RowKind, subject: &str, rule: PrimitiveRule) -> ProofScript {

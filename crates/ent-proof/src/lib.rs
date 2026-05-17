@@ -28,6 +28,12 @@ pub enum PropositionKind {
     DatasetAdmissible,
     ModelAdmissible,
     TrainingAdmissible,
+    CanonicalAdmissible,
+    ArtifactBound,
+    LoweringAdmissible,
+    ExecutorConfined,
+    WitnessSatisfies,
+    TraceEquivalent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -62,6 +68,11 @@ pub enum RowKind {
     Dataset,
     Model,
     Training,
+    Canonical,
+    Artifact,
+    Lowering,
+    Executor,
+    Witness,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -90,6 +101,12 @@ pub enum PrimitiveRule {
     DatasetAdmissibleFromDataset,
     ModelAdmissibleFromModel,
     TrainingAdmissibleFromTraining,
+    CanonicalAdmissibleFromCanonical,
+    ArtifactBoundFromArtifact,
+    LoweringAdmissibleFromLowering,
+    ExecutorConfinedFromExecutor,
+    WitnessSatisfiesContract,
+    TraceEquivalent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +196,12 @@ pub fn parse_proposition(input: &str) -> Result<Proposition, ProofParseError> {
         "dataset_admissible" => PropositionKind::DatasetAdmissible,
         "model_admissible" => PropositionKind::ModelAdmissible,
         "training_admissible" => PropositionKind::TrainingAdmissible,
+        "canonical_admissible" => PropositionKind::CanonicalAdmissible,
+        "artifact_bound" => PropositionKind::ArtifactBound,
+        "lowering_admissible" => PropositionKind::LoweringAdmissible,
+        "executor_confined" => PropositionKind::ExecutorConfined,
+        "witness_satisfies" => PropositionKind::WitnessSatisfies,
+        "trace_equivalent" => PropositionKind::TraceEquivalent,
         _ => return Err(ProofParseError::UnknownProposition(operator.to_owned())),
     };
     Ok(Proposition {
@@ -299,6 +322,11 @@ fn parse_row_kind(input: &str) -> Result<RowKind, ProofParseError> {
         "dataset" => Ok(RowKind::Dataset),
         "model" => Ok(RowKind::Model),
         "training" => Ok(RowKind::Training),
+        "canonical" => Ok(RowKind::Canonical),
+        "artifact" => Ok(RowKind::Artifact),
+        "lowering" => Ok(RowKind::Lowering),
+        "executor" => Ok(RowKind::Executor),
+        "witness" => Ok(RowKind::Witness),
         _ => Err(ProofParseError::UnknownRowKind(input.to_owned())),
     }
 }
@@ -349,6 +377,14 @@ fn parse_rule(input: &str) -> Result<PrimitiveRule, ProofParseError> {
         "dataset_admissible_from_dataset" => Ok(PrimitiveRule::DatasetAdmissibleFromDataset),
         "model_admissible_from_model" => Ok(PrimitiveRule::ModelAdmissibleFromModel),
         "training_admissible_from_training" => Ok(PrimitiveRule::TrainingAdmissibleFromTraining),
+        "canonical_admissible_from_canonical" => {
+            Ok(PrimitiveRule::CanonicalAdmissibleFromCanonical)
+        }
+        "artifact_bound_from_artifact" => Ok(PrimitiveRule::ArtifactBoundFromArtifact),
+        "lowering_admissible_from_lowering" => Ok(PrimitiveRule::LoweringAdmissibleFromLowering),
+        "executor_confined_from_executor" => Ok(PrimitiveRule::ExecutorConfinedFromExecutor),
+        "witness_satisfies_contract" => Ok(PrimitiveRule::WitnessSatisfiesContract),
+        "trace_equivalent" => Ok(PrimitiveRule::TraceEquivalent),
         _ => Err(ProofParseError::UnknownRule(input.to_owned())),
     }
 }
@@ -376,10 +412,12 @@ pub enum ProofCheckError {
     UnknownVariable(String),
     #[error("certificate row is unavailable: {kind:?} {subject}")]
     UnknownRow { kind: RowKind, subject: String },
-    #[error("rule {rule:?} expects one row argument")]
+    #[error("rule {rule:?} received the wrong number of row arguments")]
     InvalidRuleArity { rule: PrimitiveRule },
     #[error("rule {rule:?} cannot consume {kind:?}")]
     WrongRowKind { rule: PrimitiveRule, kind: RowKind },
+    #[error("rule {rule:?} relation is not supported by the certificate rows")]
+    RuleRelationRejected { rule: PrimitiveRule },
     #[error("qed value is not a fact: {0}")]
     QedNotFact(String),
     #[error("proved proposition does not match theorem")]
@@ -391,6 +429,10 @@ pub enum ProofCheckError {
 
 pub trait ProofEnvironment {
     fn has_row(&self, kind: &RowKind, subject: &str) -> bool;
+
+    fn validates_rule(&self, _rule: &PrimitiveRule, _rows: &[(RowKind, String)]) -> bool {
+        true
+    }
 
     fn has_rocq_artifact(&self, _module: &str, _proposition: &Proposition) -> bool {
         false
@@ -449,7 +491,7 @@ pub fn check_proof(
                 if qed_value.is_some() {
                     return Err(ProofCheckError::TrailingStatement);
                 }
-                let fact = apply_rule(rule, args, &values)?;
+                let fact = apply_rule(environment, rule, args, &values)?;
                 insert_binding(&mut values, name, ProofValue::Fact(fact))?;
             }
             ProofStatement::UseRocq { module } => {
@@ -505,103 +547,155 @@ fn insert_binding(
 }
 
 fn apply_rule(
+    environment: &impl ProofEnvironment,
     rule: &PrimitiveRule,
     args: &[String],
     values: &BTreeMap<String, ProofValue>,
 ) -> Result<Proposition, ProofCheckError> {
-    if args.len() != 1 {
+    let contract = rule_contract(rule);
+    if args.len() != contract.rows.len() {
         return Err(ProofCheckError::InvalidRuleArity { rule: rule.clone() });
     }
-    let arg = &args[0];
-    let Some(ProofValue::Row { kind, subject }) = values.get(arg) else {
-        return Err(ProofCheckError::UnknownVariable(arg.clone()));
-    };
-    let (expected_kind, proposition_kind) = rule_contract(rule);
-    if kind != &expected_kind {
-        return Err(ProofCheckError::WrongRowKind {
-            rule: rule.clone(),
-            kind: kind.clone(),
-        });
+    let mut rows = Vec::with_capacity(args.len());
+    for (arg, expected_kind) in args.iter().zip(contract.rows.iter()) {
+        let Some(ProofValue::Row { kind, subject }) = values.get(arg) else {
+            return Err(ProofCheckError::UnknownVariable(arg.clone()));
+        };
+        if kind != expected_kind {
+            return Err(ProofCheckError::WrongRowKind {
+                rule: rule.clone(),
+                kind: kind.clone(),
+            });
+        }
+        rows.push((kind.clone(), subject.clone()));
+    }
+    if !environment.validates_rule(rule, &rows) {
+        return Err(ProofCheckError::RuleRelationRejected { rule: rule.clone() });
     }
     Ok(Proposition {
-        kind: proposition_kind,
-        subject: subject.clone(),
+        kind: contract.proposition,
+        subject: rows[contract.subject_index].1.clone(),
     })
 }
 
-fn rule_contract(rule: &PrimitiveRule) -> (RowKind, PropositionKind) {
+struct RuleContract {
+    rows: Vec<RowKind>,
+    proposition: PropositionKind,
+    subject_index: usize,
+}
+
+fn unary_rule(row: RowKind, proposition: PropositionKind) -> RuleContract {
+    RuleContract {
+        rows: vec![row],
+        proposition,
+        subject_index: 0,
+    }
+}
+
+fn rule_contract(rule: &PrimitiveRule) -> RuleContract {
     match rule {
-        PrimitiveRule::DevFrameFromRelation => (RowKind::Relation, PropositionKind::DevFrame),
+        PrimitiveRule::DevFrameFromRelation => {
+            unary_rule(RowKind::Relation, PropositionKind::DevFrame)
+        }
         PrimitiveRule::ResourceLinearFromResource => {
-            (RowKind::Resource, PropositionKind::ResourceLinear)
+            unary_rule(RowKind::Resource, PropositionKind::ResourceLinear)
         }
         PrimitiveRule::ProbabilityNormalizesFromProbability => {
-            (RowKind::Probability, PropositionKind::ProbabilityNormalizes)
+            unary_rule(RowKind::Probability, PropositionKind::ProbabilityNormalizes)
         }
         PrimitiveRule::InvariantPreservedFromInvariant => {
-            (RowKind::Invariant, PropositionKind::InvariantPreserved)
+            unary_rule(RowKind::Invariant, PropositionKind::InvariantPreserved)
         }
         PrimitiveRule::BackendAdmissibleFromBackend => {
-            (RowKind::Backend, PropositionKind::BackendAdmissible)
+            unary_rule(RowKind::Backend, PropositionKind::BackendAdmissible)
         }
         PrimitiveRule::ExternalAdmissibleFromExternal => {
-            (RowKind::External, PropositionKind::ExternalAdmissible)
+            unary_rule(RowKind::External, PropositionKind::ExternalAdmissible)
         }
         PrimitiveRule::MachineAdmissibleFromMachine => {
-            (RowKind::Machine, PropositionKind::MachineAdmissible)
+            unary_rule(RowKind::Machine, PropositionKind::MachineAdmissible)
         }
         PrimitiveRule::MemoryAdmissibleFromMemory => {
-            (RowKind::Memory, PropositionKind::MemoryAdmissible)
+            unary_rule(RowKind::Memory, PropositionKind::MemoryAdmissible)
         }
         PrimitiveRule::InstructionRefinesFromInstruction => {
-            (RowKind::Instruction, PropositionKind::InstructionRefines)
+            unary_rule(RowKind::Instruction, PropositionKind::InstructionRefines)
         }
-        PrimitiveRule::AbiAdmissibleFromAbi => (RowKind::Abi, PropositionKind::AbiAdmissible),
-        PrimitiveRule::ProofArtifactCheckedFromArtifact => (
+        PrimitiveRule::AbiAdmissibleFromAbi => {
+            unary_rule(RowKind::Abi, PropositionKind::AbiAdmissible)
+        }
+        PrimitiveRule::ProofArtifactCheckedFromArtifact => unary_rule(
             RowKind::ProofArtifact,
             PropositionKind::ProofArtifactChecked,
         ),
         PrimitiveRule::ParserAdmissibleFromParser => {
-            (RowKind::Parser, PropositionKind::ParserAdmissible)
+            unary_rule(RowKind::Parser, PropositionKind::ParserAdmissible)
         }
         PrimitiveRule::SelectionAdmissibleFromSelection => {
-            (RowKind::Selection, PropositionKind::SelectionAdmissible)
+            unary_rule(RowKind::Selection, PropositionKind::SelectionAdmissible)
         }
         PrimitiveRule::TransformAdmissibleFromTransform => {
-            (RowKind::Transform, PropositionKind::TransformAdmissible)
+            unary_rule(RowKind::Transform, PropositionKind::TransformAdmissible)
         }
         PrimitiveRule::ValidatorAdmissibleFromValidator => {
-            (RowKind::Validator, PropositionKind::ValidatorAdmissible)
+            unary_rule(RowKind::Validator, PropositionKind::ValidatorAdmissible)
         }
         PrimitiveRule::GraphicsAdmissibleFromGraphics => {
-            (RowKind::Graphics, PropositionKind::GraphicsAdmissible)
+            unary_rule(RowKind::Graphics, PropositionKind::GraphicsAdmissible)
         }
-        PrimitiveRule::RenderTargetAdmissibleFromRenderTarget => (
+        PrimitiveRule::RenderTargetAdmissibleFromRenderTarget => unary_rule(
             RowKind::RenderTarget,
             PropositionKind::RenderTargetAdmissible,
         ),
-        PrimitiveRule::RenderPipelineAdmissibleFromRenderPipeline => (
+        PrimitiveRule::RenderPipelineAdmissibleFromRenderPipeline => unary_rule(
             RowKind::RenderPipeline,
             PropositionKind::RenderPipelineAdmissible,
         ),
         PrimitiveRule::BenchmarkAdmissibleFromBenchmark => {
-            (RowKind::Benchmark, PropositionKind::BenchmarkAdmissible)
+            unary_rule(RowKind::Benchmark, PropositionKind::BenchmarkAdmissible)
         }
         PrimitiveRule::TensorAdmissibleFromTensor => {
-            (RowKind::Tensor, PropositionKind::TensorAdmissible)
+            unary_rule(RowKind::Tensor, PropositionKind::TensorAdmissible)
         }
         PrimitiveRule::AcceleratorAdmissibleFromAccelerator => {
-            (RowKind::Accelerator, PropositionKind::AcceleratorAdmissible)
+            unary_rule(RowKind::Accelerator, PropositionKind::AcceleratorAdmissible)
         }
         PrimitiveRule::DatasetAdmissibleFromDataset => {
-            (RowKind::Dataset, PropositionKind::DatasetAdmissible)
+            unary_rule(RowKind::Dataset, PropositionKind::DatasetAdmissible)
         }
         PrimitiveRule::ModelAdmissibleFromModel => {
-            (RowKind::Model, PropositionKind::ModelAdmissible)
+            unary_rule(RowKind::Model, PropositionKind::ModelAdmissible)
         }
         PrimitiveRule::TrainingAdmissibleFromTraining => {
-            (RowKind::Training, PropositionKind::TrainingAdmissible)
+            unary_rule(RowKind::Training, PropositionKind::TrainingAdmissible)
         }
+        PrimitiveRule::CanonicalAdmissibleFromCanonical => {
+            unary_rule(RowKind::Canonical, PropositionKind::CanonicalAdmissible)
+        }
+        PrimitiveRule::ArtifactBoundFromArtifact => {
+            unary_rule(RowKind::Artifact, PropositionKind::ArtifactBound)
+        }
+        PrimitiveRule::LoweringAdmissibleFromLowering => {
+            unary_rule(RowKind::Lowering, PropositionKind::LoweringAdmissible)
+        }
+        PrimitiveRule::ExecutorConfinedFromExecutor => {
+            unary_rule(RowKind::Executor, PropositionKind::ExecutorConfined)
+        }
+        PrimitiveRule::WitnessSatisfiesContract => RuleContract {
+            rows: vec![
+                RowKind::Witness,
+                RowKind::Training,
+                RowKind::Artifact,
+                RowKind::Executor,
+            ],
+            proposition: PropositionKind::WitnessSatisfies,
+            subject_index: 0,
+        },
+        PrimitiveRule::TraceEquivalent => RuleContract {
+            rows: vec![RowKind::Witness, RowKind::Model, RowKind::Lowering],
+            proposition: PropositionKind::TraceEquivalent,
+            subject_index: 0,
+        },
     }
 }
 

@@ -20,11 +20,11 @@
     },
     {
       "name": "keyword.declaration.ent",
-      "match": "\\b(world|state|relation|law|invariant|effect|external|workspace|parser|document|select|transform|validator|graphics|render-target|render-pipeline|benchmark|tensor|accelerator|dataset|model|training|machine|memory|instruction|abi|proof-artifact|evolve|ad|measure|theorem|proof|module|import|fn|let|return|if|else|for|in)\\b"
+      "match": "\\b(world|state|relation|law|invariant|effect|external|workspace|parser|document|select|transform|validator|graphics|render-target|render-pipeline|benchmark|tensor|accelerator|dataset|canonical|artifact|lowering|executor|witness|model|training|machine|memory|instruction|abi|proof-artifact|evolve|ad|measure|theorem|proof|module|import|fn|let|return|if|else|for|in)\\b"
     },
     {
       "name": "keyword.control.ent",
-      "match": "\\b(evidence|shape|dtype|gradient|layout|kind|supports|source|digest|entry|inputs|parameters|outputs|ops|loss|optimizer|steps|batch|objective|learning-rate|uses|preserves|changes|by|differentiable)\\b"
+      "match": "\\b(evidence|shape|dtype|gradient|layout|kind|supports|source|digest|entry|inputs|parameters|outputs|ops|loss|optimizer|steps|batch|objective|learning-rate|manifest|canonical|framework|mappings|tolerance|module|function|device|network|seed|deterministic|read|write|require|artifact|uses|preserves|changes|by|differentiable)\\b"
     },
     {
       "name": "constant.numeric.ent",

@@ -142,7 +142,7 @@ world Simulation(agent A, space X) {
         &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
     )
     .expect("parse manifest json");
-    assert_eq!(manifest["schema_version"], 6);
+    assert_eq!(manifest["schema_version"], 7);
     assert_eq!(manifest["target"]["platform"], "apple-silicon-macos");
     assert!(manifest["source_hash"]
         .as_str()
@@ -177,8 +177,8 @@ world Simulation(agent A, space X) {
     let verify_json: serde_json::Value =
         serde_json::from_slice(&verify_bundle.stdout).expect("verify-bundle json");
     assert_eq!(verify_json["world"], "Simulation");
-    assert_eq!(verify_json["schema_version"], 6);
-    assert_eq!(verify_json["certificate_version"], 6);
+    assert_eq!(verify_json["schema_version"], 7);
+    assert_eq!(verify_json["certificate_version"], 7);
     assert_eq!(verify_json["artifact_count"], 5);
     assert_eq!(verify_json["target"]["platform"], "apple-silicon-macos");
 }
@@ -467,6 +467,64 @@ fn entc_runs_tensor_benchmark_and_reports_editor_tooling() {
     let check_json: serde_json::Value = serde_json::from_slice(&check.stdout).expect("check json");
     assert_eq!(check_json["checked_rows"]["tensors"], 8);
     assert_eq!(check_json["checked_rows"]["trainings"], 1);
+    assert_eq!(check_json["checked_rows"]["artifacts"], 1);
+    assert_eq!(check_json["checked_rows"]["witnesses"], 1);
+
+    let verify_artifact = entc_command()
+        .args(["verify-artifact", source.to_str().unwrap(), "--json"])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc verify-artifact");
+    assert!(
+        verify_artifact.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verify_artifact.stderr)
+    );
+    let artifact_json: serde_json::Value =
+        serde_json::from_slice(&verify_artifact.stdout).expect("artifact json");
+    assert_eq!(artifact_json["artifact"], "xor_data_artifact");
+
+    let binding = workspace.join("target/test-ent-xor-contract.py");
+    let bind = entc_command()
+        .args([
+            "bind",
+            source.to_str().unwrap(),
+            "--target",
+            "python",
+            "--framework",
+            "pytorch_fx",
+            "--output",
+            binding.to_str().unwrap(),
+            "--json",
+        ])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc bind");
+    assert!(
+        bind.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    assert!(binding.exists());
+
+    let verify_witness = entc_command()
+        .args([
+            "verify-witness",
+            source.to_str().unwrap(),
+            "examples/artifacts/xor_run.witness.json",
+            "--json",
+        ])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc verify-witness");
+    assert!(
+        verify_witness.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verify_witness.stderr)
+    );
+    let witness_json: serde_json::Value =
+        serde_json::from_slice(&verify_witness.stdout).expect("witness json");
+    assert_eq!(witness_json["artifact"], "xor_data_artifact");
 
     let tensor_bench = entc_command()
         .args([

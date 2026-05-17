@@ -3,7 +3,9 @@ use ent_core::{
     StateId, TransformTarget, VerificationReport, CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
     MIN_CERTIFICATE_SCHEMA_VERSION,
 };
-use ent_proof::{check_proof, ProofCheckError, ProofEnvironment, PropositionKind, RowKind};
+use ent_proof::{
+    check_proof, PrimitiveRule, ProofCheckError, ProofEnvironment, PropositionKind, RowKind,
+};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -90,6 +92,11 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.datasets += check_datasets(cert)?;
     checked.models += check_models(cert)?;
     checked.trainings += check_trainings(cert)?;
+    checked.canonicals += check_canonicals(cert)?;
+    checked.artifacts += check_artifacts(cert)?;
+    checked.lowerings += check_lowerings(cert)?;
+    checked.executors += check_executors(cert)?;
+    checked.witnesses += check_witnesses(cert)?;
     checked.proof_artifacts += check_proof_artifacts(cert)?;
     checked.machines += check_machines(cert)?;
     checked.memory += check_machine_memory(cert)?;
@@ -99,6 +106,7 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     check_workspace_proof_obligations(cert)?;
     check_graphics_proof_obligations(cert)?;
     check_tensor_proof_obligations(cert)?;
+    check_runtime_boundary_proof_obligations(cert)?;
     check_machine_proof_obligations(cert)?;
 
     let type_map = type_map(cert, &states)?;
@@ -1321,6 +1329,11 @@ fn check_trainings(cert: &Certificate) -> Result<usize, KernelError> {
         .iter()
         .map(|dataset| dataset.name.as_str())
         .collect();
+    let artifacts: IndexSet<&str> = cert
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.name.as_str())
+        .collect();
     let accelerators: IndexMap<&str, &ent_core::AcceleratorContract> = cert
         .accelerators
         .iter()
@@ -1350,6 +1363,15 @@ fn check_trainings(cert: &Certificate) -> Result<usize, KernelError> {
                 vec![training.name.clone(), training.dataset.clone()],
             );
         }
+        if let Some(artifact) = &training.artifact {
+            if !artifacts.contains(artifact.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "training references undeclared artifact",
+                    vec![training.name.clone(), artifact.clone()],
+                );
+            }
+        }
         let Some(accelerator) = accelerators.get(training.accelerator.as_str()) else {
             return fail(
                 InstabilityKind::UnknownReference,
@@ -1370,6 +1392,10 @@ fn check_trainings(cert: &Certificate) -> Result<usize, KernelError> {
         if training.optimizer.is_empty()
             || training.objective.is_empty()
             || training.accelerator.is_empty()
+            || training
+                .artifact
+                .as_deref()
+                .is_some_and(|artifact| !valid_symbol(artifact))
             || training.steps == 0
             || training.batch == 0
             || !training.learning_rate.is_finite()
@@ -1422,6 +1448,110 @@ fn valid_symbol(value: &str) -> bool {
     let mut chars = value.chars();
     matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
+}
+
+fn valid_module_path(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .split('.')
+            .all(|segment| !segment.is_empty() && valid_symbol(segment))
+}
+
+fn valid_framework_target(value: &str) -> bool {
+    valid_module_path(value) || value.split("::").all(valid_module_path)
+}
+
+fn valid_sha256_uri(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn portable_relative_path(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty()
+        || value.starts_with('/')
+        || value.contains('\\')
+        || value.contains('\0')
+        || value.contains(':')
+    {
+        return false;
+    }
+    let mut has_segment = false;
+    for segment in value.split('/') {
+        if segment.is_empty() {
+            return false;
+        }
+        if segment == "." {
+            continue;
+        }
+        if segment == ".." {
+            return false;
+        }
+        has_segment = true;
+    }
+    has_segment
+}
+
+fn parse_lowering_mappings(
+    lowering: &ent_core::LoweringContract,
+) -> Result<IndexSet<&str>, KernelError> {
+    let mut mapped_ops = IndexSet::new();
+    for mapping in &lowering.mappings {
+        let Some((op, targets)) = mapping.split_once('=') else {
+            return fail(
+                InstabilityKind::LoweringInadmissible,
+                "lowering mapping must use op=target(+target) form",
+                vec![lowering.name.clone(), mapping.clone()],
+            );
+        };
+        let op = op.trim();
+        if !valid_symbol(op) || !mapped_ops.insert(op) {
+            return fail(
+                InstabilityKind::LoweringInadmissible,
+                "lowering mapping must name each source op once",
+                vec![lowering.name.clone(), mapping.clone()],
+            );
+        }
+        let targets = targets
+            .split('+')
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+            .collect::<Vec<_>>();
+        if targets.is_empty() || targets.iter().any(|target| !valid_framework_target(target)) {
+            return fail(
+                InstabilityKind::LoweringInadmissible,
+                "lowering mapping target must be an explicit framework primitive path",
+                vec![lowering.name.clone(), mapping.clone()],
+            );
+        }
+    }
+    Ok(mapped_ops)
+}
+
+fn valid_metric_requirement(requirement: &str) -> bool {
+    parse_metric_requirement(requirement).is_some()
+}
+
+fn parse_metric_requirement(requirement: &str) -> Option<(&str, &str, f64)> {
+    for op in ["<=", ">=", "==", "<", ">"] {
+        if let Some((metric, value)) = requirement.split_once(op) {
+            let metric = metric.trim();
+            let value = value.trim().parse::<f64>().ok()?;
+            if valid_metric_path(metric) && value.is_finite() {
+                return Some((metric, op, value));
+            }
+        }
+    }
+    None
+}
+
+fn valid_metric_path(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .split('.')
+            .all(|segment| !segment.is_empty() && valid_symbol(segment))
 }
 
 struct ModelOpParts {
@@ -1683,6 +1813,333 @@ fn check_instructions(cert: &Certificate) -> Result<usize, KernelError> {
     Ok(cert.instructions.len())
 }
 
+fn check_canonicals(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for canonical in &cert.canonicals {
+        require_evidence("canonical", &canonical.name, &canonical.evidence)?;
+        if !names.insert(canonical.name.as_str()) {
+            return fail(
+                InstabilityKind::CanonicalInadmissible,
+                "canonical contracts must have unique names",
+                vec![canonical.name.clone()],
+            );
+        }
+        if !valid_symbol(&canonical.name)
+            || !valid_symbol(&canonical.format)
+            || canonical.fields.is_empty()
+            || canonical.fields.iter().any(|field| !valid_symbol(field))
+        {
+            return fail(
+                InstabilityKind::CanonicalInadmissible,
+                "canonical row must name a format and symbolic serialization fields",
+                vec![
+                    canonical.name.clone(),
+                    canonical.format.clone(),
+                    canonical.fields.join(","),
+                ],
+            );
+        }
+    }
+    Ok(cert.canonicals.len())
+}
+
+fn check_artifacts(cert: &Certificate) -> Result<usize, KernelError> {
+    let canonicals: IndexSet<&str> = cert
+        .canonicals
+        .iter()
+        .map(|canonical| canonical.name.as_str())
+        .collect();
+    let tensors: IndexSet<&str> = cert
+        .tensors
+        .iter()
+        .map(|tensor| tensor.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for artifact in &cert.artifacts {
+        require_evidence("artifact", &artifact.name, &artifact.evidence)?;
+        if !names.insert(artifact.name.as_str()) {
+            return fail(
+                InstabilityKind::ArtifactInadmissible,
+                "artifact contracts must have unique names",
+                vec![artifact.name.clone()],
+            );
+        }
+        if !valid_symbol(&artifact.name)
+            || !valid_symbol(&artifact.kind)
+            || artifact.tensors.is_empty()
+            || !valid_sha256_uri(&artifact.digest)
+            || !portable_relative_path(&artifact.manifest)
+        {
+            return fail(
+                InstabilityKind::ArtifactInadmissible,
+                "artifact row must bind tensors to a portable manifest path and sha256 digest",
+                vec![
+                    artifact.name.clone(),
+                    artifact.manifest.clone(),
+                    artifact.digest.clone(),
+                ],
+            );
+        }
+        if !canonicals.contains(artifact.canonical.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "artifact references undeclared canonical contract",
+                vec![artifact.name.clone(), artifact.canonical.clone()],
+            );
+        }
+        let mut seen_tensors = IndexSet::new();
+        for tensor in &artifact.tensors {
+            if !seen_tensors.insert(tensor.as_str()) {
+                return fail(
+                    InstabilityKind::ArtifactInadmissible,
+                    "artifact tensor list must not contain duplicates",
+                    vec![artifact.name.clone(), tensor.clone()],
+                );
+            }
+            if !tensors.contains(tensor.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "artifact references undeclared tensor",
+                    vec![artifact.name.clone(), tensor.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.artifacts.len())
+}
+
+fn check_lowerings(cert: &Certificate) -> Result<usize, KernelError> {
+    let models: IndexMap<&str, &ent_core::ModelContract> = cert
+        .models
+        .iter()
+        .map(|model| (model.name.as_str(), model))
+        .collect();
+    let mut names = IndexSet::new();
+    for lowering in &cert.lowerings {
+        require_evidence("lowering", &lowering.name, &lowering.evidence)?;
+        if !names.insert(lowering.name.as_str()) {
+            return fail(
+                InstabilityKind::LoweringInadmissible,
+                "lowering contracts must have unique names",
+                vec![lowering.name.clone()],
+            );
+        }
+        let Some(model) = models.get(lowering.model.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "lowering references undeclared model",
+                vec![lowering.name.clone(), lowering.model.clone()],
+            );
+        };
+        if !valid_symbol(&lowering.name)
+            || !valid_symbol(&lowering.framework)
+            || lowering.mappings.is_empty()
+            || !lowering.tolerance.is_finite()
+            || lowering.tolerance < 0.0
+        {
+            return fail(
+                InstabilityKind::LoweringInadmissible,
+                "lowering row must name framework mappings and non-negative tolerance",
+                vec![
+                    lowering.name.clone(),
+                    lowering.framework.clone(),
+                    lowering.tolerance.to_string(),
+                ],
+            );
+        }
+        let mapped_ops = parse_lowering_mappings(lowering)?;
+        for op in &model.ops {
+            let op_name = model_op_name(op)?;
+            if !mapped_ops.contains(op_name.as_str()) {
+                return fail(
+                    InstabilityKind::LoweringInadmissible,
+                    "lowering must cover every model op explicitly",
+                    vec![lowering.name.clone(), model.name.clone(), op_name],
+                );
+            }
+        }
+    }
+    Ok(cert.lowerings.len())
+}
+
+fn check_executors(cert: &Certificate) -> Result<usize, KernelError> {
+    let artifacts: IndexSet<&str> = cert
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for executor in &cert.executors {
+        require_evidence("executor", &executor.name, &executor.evidence)?;
+        if !names.insert(executor.name.as_str()) {
+            return fail(
+                InstabilityKind::ExecutorInadmissible,
+                "executor contracts must have unique names",
+                vec![executor.name.clone()],
+            );
+        }
+        if !valid_symbol(&executor.name)
+            || !valid_symbol(&executor.framework)
+            || !valid_module_path(&executor.module)
+            || !valid_symbol(&executor.function)
+            || !valid_symbol(&executor.device)
+            || !valid_symbol(&executor.network)
+            || executor.write_paths.is_empty()
+            || executor
+                .write_paths
+                .iter()
+                .any(|path| !portable_relative_path(path))
+        {
+            return fail(
+                InstabilityKind::ExecutorInadmissible,
+                "executor row must declare explicit module/function/device/network and scoped writes",
+                vec![executor.name.clone(), executor.module.clone()],
+            );
+        }
+        for artifact in &executor.read_artifacts {
+            if !artifacts.contains(artifact.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "executor references undeclared readable artifact",
+                    vec![executor.name.clone(), artifact.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.executors.len())
+}
+
+fn check_witnesses(cert: &Certificate) -> Result<usize, KernelError> {
+    let trainings: IndexMap<&str, &ent_core::TrainingContract> = cert
+        .trainings
+        .iter()
+        .map(|training| (training.name.as_str(), training))
+        .collect();
+    let models: IndexMap<&str, &ent_core::ModelContract> = cert
+        .models
+        .iter()
+        .map(|model| (model.name.as_str(), model))
+        .collect();
+    let artifacts: IndexMap<&str, &ent_core::ArtifactContract> = cert
+        .artifacts
+        .iter()
+        .map(|artifact| (artifact.name.as_str(), artifact))
+        .collect();
+    let lowerings: IndexMap<&str, &ent_core::LoweringContract> = cert
+        .lowerings
+        .iter()
+        .map(|lowering| (lowering.name.as_str(), lowering))
+        .collect();
+    let executors: IndexMap<&str, &ent_core::ExecutorContract> = cert
+        .executors
+        .iter()
+        .map(|executor| (executor.name.as_str(), executor))
+        .collect();
+    let mut names = IndexSet::new();
+    for witness in &cert.witnesses {
+        require_evidence("witness", &witness.name, &witness.evidence)?;
+        if !names.insert(witness.name.as_str()) {
+            return fail(
+                InstabilityKind::WitnessInadmissible,
+                "witness contracts must have unique names",
+                vec![witness.name.clone()],
+            );
+        }
+        let Some(training) = trainings.get(witness.training.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "witness references undeclared training",
+                vec![witness.name.clone(), witness.training.clone()],
+            );
+        };
+        let Some(model) = models.get(training.model.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "witness training references undeclared model",
+                vec![witness.name.clone(), training.model.clone()],
+            );
+        };
+        let Some(artifact) = artifacts.get(witness.artifact.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "witness references undeclared artifact",
+                vec![witness.name.clone(), witness.artifact.clone()],
+            );
+        };
+        let Some(lowering) = lowerings.get(witness.lowering.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "witness references undeclared lowering",
+                vec![witness.name.clone(), witness.lowering.clone()],
+            );
+        };
+        let Some(executor) = executors.get(witness.executor.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "witness references undeclared executor",
+                vec![witness.name.clone(), witness.executor.clone()],
+            );
+        };
+        if !valid_symbol(&witness.name)
+            || !portable_relative_path(&witness.manifest)
+            || witness.requirements.is_empty()
+            || witness
+                .requirements
+                .iter()
+                .any(|requirement| !valid_metric_requirement(requirement))
+        {
+            return fail(
+                InstabilityKind::WitnessInadmissible,
+                "witness row must declare manifest and parseable metric requirements",
+                vec![witness.name.clone(), witness.manifest.clone()],
+            );
+        }
+        if training.artifact.as_deref() != Some(artifact.name.as_str()) {
+            return fail(
+                InstabilityKind::WitnessInadmissible,
+                "witness artifact must be explicitly selected by its training row",
+                vec![
+                    witness.name.clone(),
+                    training.artifact.clone().unwrap_or_default(),
+                    artifact.name.clone(),
+                ],
+            );
+        }
+        if lowering.model != training.model {
+            return fail(
+                InstabilityKind::WitnessInadmissible,
+                "witness lowering must target the training model",
+                vec![
+                    witness.name.clone(),
+                    lowering.model.clone(),
+                    training.model.clone(),
+                ],
+            );
+        }
+        if !executor.read_artifacts.contains(&artifact.name) {
+            return fail(
+                InstabilityKind::WitnessInadmissible,
+                "witness executor must read the bound artifact",
+                vec![
+                    witness.name.clone(),
+                    executor.name.clone(),
+                    artifact.name.clone(),
+                ],
+            );
+        }
+        for input in &model.inputs {
+            if !artifact.tensors.contains(input) {
+                return fail(
+                    InstabilityKind::WitnessInadmissible,
+                    "witness artifact must bind every model input tensor",
+                    vec![witness.name.clone(), artifact.name.clone(), input.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.witnesses.len())
+}
+
 fn check_abis(cert: &Certificate) -> Result<usize, KernelError> {
     let machines: IndexSet<&str> = cert
         .machines
@@ -1850,6 +2307,56 @@ fn check_tensor_proof_obligations(cert: &Certificate) -> Result<(), KernelError>
             PropositionKind::TrainingAdmissible,
             &training.name,
             "training contract lacks an admissibility proof",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_runtime_boundary_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
+    for canonical in &cert.canonicals {
+        require_proof(
+            cert,
+            PropositionKind::CanonicalAdmissible,
+            &canonical.name,
+            "canonical contract lacks an admissibility proof",
+        )?;
+    }
+    for artifact in &cert.artifacts {
+        require_proof(
+            cert,
+            PropositionKind::ArtifactBound,
+            &artifact.name,
+            "artifact lacks a runtime binding proof",
+        )?;
+    }
+    for lowering in &cert.lowerings {
+        require_proof(
+            cert,
+            PropositionKind::LoweringAdmissible,
+            &lowering.name,
+            "lowering contract lacks an admissibility proof",
+        )?;
+    }
+    for executor in &cert.executors {
+        require_proof(
+            cert,
+            PropositionKind::ExecutorConfined,
+            &executor.name,
+            "executor contract lacks a confinement proof",
+        )?;
+    }
+    for witness in &cert.witnesses {
+        require_proof(
+            cert,
+            PropositionKind::WitnessSatisfies,
+            &witness.name,
+            "runtime witness lacks a satisfaction proof",
+        )?;
+        require_proof(
+            cert,
+            PropositionKind::TraceEquivalent,
+            &witness.name,
+            "runtime witness lacks a trace equivalence proof",
         )?;
     }
     Ok(())
@@ -2115,6 +2622,31 @@ impl ProofEnvironment for CertificateProofEnvironment<'_> {
                 .trainings
                 .iter()
                 .any(|training| training.name == subject),
+            RowKind::Canonical => self
+                .cert
+                .canonicals
+                .iter()
+                .any(|canonical| canonical.name == subject),
+            RowKind::Artifact => self
+                .cert
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.name == subject),
+            RowKind::Lowering => self
+                .cert
+                .lowerings
+                .iter()
+                .any(|lowering| lowering.name == subject),
+            RowKind::Executor => self
+                .cert
+                .executors
+                .iter()
+                .any(|executor| executor.name == subject),
+            RowKind::Witness => self
+                .cert
+                .witnesses
+                .iter()
+                .any(|witness| witness.name == subject),
         }
     }
 
@@ -2122,6 +2654,80 @@ impl ProofEnvironment for CertificateProofEnvironment<'_> {
         self.cert.proof_artifacts.iter().any(|artifact| {
             artifact.module == module && artifact.obligations.contains(&proposition.subject)
         })
+    }
+
+    fn validates_rule(&self, rule: &PrimitiveRule, rows: &[(RowKind, String)]) -> bool {
+        match rule {
+            PrimitiveRule::WitnessSatisfiesContract => {
+                let [(_, witness_name), (_, training_name), (_, artifact_name), (_, executor_name)] =
+                    rows
+                else {
+                    return false;
+                };
+                let Some(witness) = self
+                    .cert
+                    .witnesses
+                    .iter()
+                    .find(|witness| &witness.name == witness_name)
+                else {
+                    return false;
+                };
+                let Some(training) = self
+                    .cert
+                    .trainings
+                    .iter()
+                    .find(|training| &training.name == training_name)
+                else {
+                    return false;
+                };
+                let Some(executor) = self
+                    .cert
+                    .executors
+                    .iter()
+                    .find(|executor| &executor.name == executor_name)
+                else {
+                    return false;
+                };
+                witness.training == *training_name
+                    && witness.artifact == *artifact_name
+                    && witness.executor == *executor_name
+                    && training.artifact.as_deref() == Some(artifact_name.as_str())
+                    && executor.read_artifacts.contains(artifact_name)
+            }
+            PrimitiveRule::TraceEquivalent => {
+                let [(_, witness_name), (_, model_name), (_, lowering_name)] = rows else {
+                    return false;
+                };
+                let Some(witness) = self
+                    .cert
+                    .witnesses
+                    .iter()
+                    .find(|witness| &witness.name == witness_name)
+                else {
+                    return false;
+                };
+                let Some(lowering) = self
+                    .cert
+                    .lowerings
+                    .iter()
+                    .find(|lowering| &lowering.name == lowering_name)
+                else {
+                    return false;
+                };
+                let Some(training) = self
+                    .cert
+                    .trainings
+                    .iter()
+                    .find(|training| training.name == witness.training)
+                else {
+                    return false;
+                };
+                witness.lowering == *lowering_name
+                    && lowering.model == *model_name
+                    && training.model == *model_name
+            }
+            _ => true,
+        }
     }
 }
 

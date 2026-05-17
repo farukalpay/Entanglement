@@ -1,0 +1,24 @@
+{
+  "canonical": "tensor_canon_v1",
+  "schema": "ent.tensor-manifest.v1",
+  "tensors": {
+    "features": {
+      "dtype": "f32",
+      "layout": "row-major",
+      "sha256": "sha256:ee94302dbe683df9c7aa25db5b51b3ac98de330736f5f1a2bf93bf2cb06c5023",
+      "shape": [
+        4,
+        2
+      ]
+    },
+    "labels": {
+      "dtype": "f32",
+      "layout": "row-major",
+      "sha256": "sha256:7ac3663794515bdeecc74a727482328ced100c0b40bca32277010cc5a0420541",
+      "shape": [
+        4,
+        2
+      ]
+    }
+  }
+}

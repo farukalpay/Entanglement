@@ -17,9 +17,14 @@ world TensorXor(agent Trainer, space Batch) {
   tensor logits shape [4,2] dtype f32 gradient none layout row-major evidence logits_tensor_shape
   tensor loss shape [1] dtype f32 gradient none layout scalar evidence loss_tensor_shape
   accelerator cpu kind cpu memory host precision f32 supports [linear,matmul,add,relu,softmax_cross_entropy] evidence local_cpu_tensor_executor
-  dataset xor tensors [features,labels,w1,b1,w2,b2] source "inline:features=0,0;0,1;1,0;1,1|labels=1,0;0,1;0,1;1,0|w1=0.2,-0.1;0.1,0.3|b1=0,0|w2=0.2,-0.2;0.1,0.1|b2=0,0" digest "sha256:d914ae26806a05338753d08955a79695b476d80cab72ba7335442ab4e56f52a4" evidence xor_inline_dataset_digest
+  dataset xor_data tensors [features,labels,w1,b1,w2,b2] source "inline:features=0,0;0,1;1,0;1,1|labels=1,0;0,1;0,1;1,0|w1=0.2,-0.1;0.1,0.3|b1=0,0|w2=0.2,-0.2;0.1,0.1|b2=0,0" digest "sha256:d914ae26806a05338753d08955a79695b476d80cab72ba7335442ab4e56f52a4" evidence xor_inline_dataset_digest
   model xor_mlp entry forward inputs [features,labels] parameters [w1,b1,w2,b2] outputs [logits,loss] ops ["linear(features,w1,b1)->hidden","relu(hidden)->activated","linear(activated,w2,b2)->logits","softmax_cross_entropy(logits,labels)->loss"] loss loss evidence xor_mlp_op_graph
-  training xor_train model xor_mlp dataset xor accelerator cpu optimizer sgd learning-rate 0.2 steps 20 batch 4 objective minimize_loss evidence xor_training_contract
+  training xor_train model xor_mlp dataset xor_data artifact xor_data_artifact accelerator cpu optimizer sgd learning-rate 0.2 steps 20 batch 4 objective minimize_loss evidence xor_training_contract
+  canonical tensor_canon_v1 format tensor-manifest-v1 fields [shape,dtype,layout,digest] evidence tensor_manifest_canonical_json
+  artifact xor_data_artifact kind dataset tensors [features,labels] manifest "data/xor-dataset-manifest.json" digest "sha256:db924bc71be2ca48c0fd2b067e06c51ada1baec7d50757f8a7674e1015333c6a" canonical tensor_canon_v1 evidence xor_dataset_manifest_digest
+  lowering xor_pytorch model xor_mlp framework pytorch_fx mappings ["linear=torch.matmul+torch.add","relu=torch.nn.functional.relu","softmax_cross_entropy=torch.nn.functional.cross_entropy"] tolerance abs=0.000001 evidence xor_pytorch_lowering
+  executor local_python framework pytorch_fx module "train_xor" function "train" device cpu network off seed 1337 deterministic true read [xor_data_artifact] write ["artifacts"] evidence local_python_runtime_boundary
+  witness xor_run training xor_train artifact xor_data_artifact lowering xor_pytorch executor local_python manifest "artifacts/xor_run.witness.json" require ["final_loss<=0.75"] evidence xor_runtime_witness_contract
 
   theorem features_ok : tensor_admissible(features)
   theorem labels_ok : tensor_admissible(labels)
@@ -30,9 +35,15 @@ world TensorXor(agent Trainer, space Batch) {
   theorem logits_ok : tensor_admissible(logits)
   theorem loss_ok : tensor_admissible(loss)
   theorem cpu_ok : accelerator_admissible(cpu)
-  theorem xor_data_ok : dataset_admissible(xor)
+  theorem xor_data_ok : dataset_admissible(xor_data)
   theorem xor_model_ok : model_admissible(xor_mlp)
   theorem xor_training_ok : training_admissible(xor_train)
+  theorem tensor_canon_ok : canonical_admissible(tensor_canon_v1)
+  theorem xor_artifact_ok : artifact_bound(xor_data_artifact)
+  theorem xor_lowering_ok : lowering_admissible(xor_pytorch)
+  theorem local_executor_ok : executor_confined(local_python)
+  theorem xor_witness_ok : witness_satisfies(xor_run)
+  theorem xor_trace_ok : trace_equivalent(xor_run)
 
   proof features_ok {
     let row = row tensor features
@@ -80,7 +91,7 @@ world TensorXor(agent Trainer, space Batch) {
     qed fact
   }
   proof xor_data_ok {
-    let row = row dataset xor
+    let row = row dataset xor_data
     let fact = rule dataset_admissible_from_dataset(row)
     qed fact
   }
@@ -92,6 +103,41 @@ world TensorXor(agent Trainer, space Batch) {
   proof xor_training_ok {
     let row = row training xor_train
     let fact = rule training_admissible_from_training(row)
+    qed fact
+  }
+  proof tensor_canon_ok {
+    let row = row canonical tensor_canon_v1
+    let fact = rule canonical_admissible_from_canonical(row)
+    qed fact
+  }
+  proof xor_artifact_ok {
+    let row = row artifact xor_data_artifact
+    let fact = rule artifact_bound_from_artifact(row)
+    qed fact
+  }
+  proof xor_lowering_ok {
+    let row = row lowering xor_pytorch
+    let fact = rule lowering_admissible_from_lowering(row)
+    qed fact
+  }
+  proof local_executor_ok {
+    let row = row executor local_python
+    let fact = rule executor_confined_from_executor(row)
+    qed fact
+  }
+  proof xor_witness_ok {
+    let witness = row witness xor_run
+    let training = row training xor_train
+    let artifact = row artifact xor_data_artifact
+    let executor = row executor local_python
+    let fact = rule witness_satisfies_contract(witness, training, artifact, executor)
+    qed fact
+  }
+  proof xor_trace_ok {
+    let witness = row witness xor_run
+    let model = row model xor_mlp
+    let lowering = row lowering xor_pytorch
+    let fact = rule trace_equivalent(witness, model, lowering)
     qed fact
   }
 }

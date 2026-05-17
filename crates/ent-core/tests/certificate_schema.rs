@@ -5,7 +5,7 @@ use ent_core::{
 use ent_proof::{ProofCertificate, ProofScript, Proposition, PropositionKind};
 
 #[test]
-fn certificate_v6_roundtrips_with_machine_graphics_and_tensor_contract_fields() {
+fn certificate_v7_roundtrips_with_runtime_boundary_contract_fields() {
     let cert = minimal_certificate();
     assert_eq!(cert.version, CERTIFICATE_SCHEMA_VERSION);
 
@@ -28,6 +28,11 @@ fn certificate_v6_roundtrips_with_machine_graphics_and_tensor_contract_fields() 
     assert!(json.get("datasets").is_some());
     assert!(json.get("models").is_some());
     assert!(json.get("trainings").is_some());
+    assert!(json.get("canonicals").is_some());
+    assert!(json.get("artifacts").is_some());
+    assert!(json.get("lowerings").is_some());
+    assert!(json.get("executors").is_some());
+    assert!(json.get("witnesses").is_some());
     assert!(json.get("proofs").is_some());
     assert!(json.get("proof_obligations").is_none());
     assert_eq!(json["program_states"][0]["name"], "truth");
@@ -83,6 +88,11 @@ fn minimal_certificate() -> Certificate {
         datasets: vec![],
         models: vec![],
         trainings: vec![],
+        canonicals: vec![],
+        artifacts: vec![],
+        lowerings: vec![],
+        executors: vec![],
+        witnesses: vec![],
         machines: vec![],
         memory: vec![],
         instructions: vec![],

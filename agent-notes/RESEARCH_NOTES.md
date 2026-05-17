@@ -17,6 +17,10 @@ These notes explain the architecture choices behind the tensor extension.
   explicit `.ent` model row with `ops [...]` so the graph is inspectable before
   execution.
   Source: https://www.tensorflow.org/guide/intro_to_graphs
+- Runtime traces are modeled as evidence, not assumptions. The current
+  `lowering` and `witness` rows require the observed primitive trace to match
+  the lowered model graph through a structural proof rule that consumes witness,
+  model, and lowering rows together.
 - `tf.function` shows the practical split between eager debugging and graph
   execution. Entanglement keeps the checked graph explicit and leaves future
   lowering/fusion work to runtime backends.

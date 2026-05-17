@@ -8,6 +8,14 @@ Tensor benchmark:
 entc tensor-bench examples/tensor-xor.ent --iterations 1 --json
 ```
 
+Runtime boundary checks:
+
+```bash
+entc verify-artifact examples/tensor-xor.ent --json
+entc bind examples/tensor-xor.ent --target python --framework pytorch_fx --output build/ent_xor_contract.py
+entc verify-witness examples/tensor-xor.ent examples/artifacts/xor_run.witness.json --json
+```
+
 Graphics benchmark:
 
 ```bash

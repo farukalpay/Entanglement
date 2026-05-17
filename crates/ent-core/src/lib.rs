@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 6;
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 7;
 pub const MIN_CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 pub const MAX_MODAL_DIMENSIONS: usize = 12;
 
@@ -343,12 +343,70 @@ pub struct TrainingContract {
     pub name: String,
     pub model: String,
     pub dataset: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<String>,
     pub accelerator: String,
     pub optimizer: String,
     pub learning_rate: f64,
     pub steps: u32,
     pub batch: u32,
     pub objective: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalContract {
+    pub name: String,
+    pub format: String,
+    pub fields: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactContract {
+    pub name: String,
+    pub kind: String,
+    pub tensors: Vec<String>,
+    pub manifest: String,
+    pub digest: String,
+    pub canonical: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoweringContract {
+    pub name: String,
+    pub model: String,
+    pub framework: String,
+    pub mappings: Vec<String>,
+    pub tolerance: f64,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutorContract {
+    pub name: String,
+    pub framework: String,
+    pub module: String,
+    pub function: String,
+    pub device: String,
+    pub network: String,
+    pub seed: u64,
+    pub deterministic: bool,
+    pub read_artifacts: Vec<String>,
+    pub write_paths: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WitnessContract {
+    pub name: String,
+    pub training: String,
+    pub artifact: String,
+    pub lowering: String,
+    pub executor: String,
+    pub manifest: String,
+    pub requirements: Vec<String>,
     pub evidence: String,
 }
 
@@ -577,6 +635,16 @@ pub struct Certificate {
     #[serde(default)]
     pub trainings: Vec<TrainingContract>,
     #[serde(default)]
+    pub canonicals: Vec<CanonicalContract>,
+    #[serde(default)]
+    pub artifacts: Vec<ArtifactContract>,
+    #[serde(default)]
+    pub lowerings: Vec<LoweringContract>,
+    #[serde(default)]
+    pub executors: Vec<ExecutorContract>,
+    #[serde(default)]
+    pub witnesses: Vec<WitnessContract>,
+    #[serde(default)]
     pub machines: Vec<MachineContract>,
     #[serde(default)]
     pub memory: Vec<MemoryContract>,
@@ -619,6 +687,11 @@ pub struct CheckedRows {
     pub datasets: usize,
     pub models: usize,
     pub trainings: usize,
+    pub canonicals: usize,
+    pub artifacts: usize,
+    pub lowerings: usize,
+    pub executors: usize,
+    pub witnesses: usize,
     pub machines: usize,
     pub memory: usize,
     pub instructions: usize,
@@ -657,6 +730,11 @@ pub enum InstabilityKind {
     DatasetInadmissible,
     ModelInadmissible,
     TrainingInadmissible,
+    CanonicalInadmissible,
+    ArtifactInadmissible,
+    LoweringInadmissible,
+    ExecutorInadmissible,
+    WitnessInadmissible,
     MachineInadmissible,
     MemoryInadmissible,
     InstructionInadmissible,

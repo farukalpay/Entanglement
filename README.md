@@ -3,15 +3,15 @@
 Entanglement is a certificate-native `.ent` language for executable programs
 whose important semantic rows are visible to the compiler and checked by a small
 kernel. The current surface covers resources, effects, external capabilities,
-machine contracts, graphics workloads, and tensor training graphs.
+machine contracts, tensor training boundaries, and graphics workloads.
 
 The language is organized around three layers:
 
 | Layer | Role |
 | --- | --- |
-| `.ent` source | Functions, worlds, tensor/model contracts, proofs, and library imports |
+| `.ent` source | Functions, worlds, runtime boundary rows, proofs, and library imports |
 | Compiler kernel | Parses, elaborates, checks certificate rows, and verifies proof scripts |
-| Runtime libraries | Execute selected domains such as tensor training or headless graphics |
+| Runtime libraries | Execute selected domains, bind runtime artifacts, and verify witnesses |
 
 ## Install
 
@@ -41,19 +41,25 @@ the supported build targets.
 
 ## Tensor Example
 
-`examples/tensor-xor.ent` defines tensors, an accelerator capability, an inline
-dataset, an MLP op graph, and a training contract. The reusable Ent library code
-for tensor shape/NN/optimizer helpers lives under `entlib/tensor/`.
+`examples/tensor-xor.ent` defines tensors, a semantic dataset row, a separately
+bound dataset artifact, a lowering contract, a Python executor boundary, an MLP
+op graph, and a runtime witness requirement. The reusable Ent library code for
+tensor shape/NN/optimizer helpers lives under `entlib/tensor/`.
 
 ```bash
 entc check examples/tensor-xor.ent --json
+entc verify-artifact examples/tensor-xor.ent --json
+entc bind examples/tensor-xor.ent --target python --framework pytorch_fx --output build/ent_xor_contract.py
+entc verify-witness examples/tensor-xor.ent examples/artifacts/xor_run.witness.json --json
 entc tensor-bench examples/tensor-xor.ent --iterations 1 --json
 ```
 
-The tensor runtime executes the checked model graph with a reverse-mode AD tape
-and SGD update loop. Accelerator rows are explicit capabilities; the current
-executor is CPU, with Metal/MPS-style graph execution modeled as a public backend
-boundary for future implementation.
+The artifact digest is the sha256 of canonical JSON with schema
+`ent.tensor-manifest.v1`; it binds tensor shape, dtype, layout, and per-tensor
+byte digests. Generated Python bindings force runtime tensors through that same
+manifest digest before training can seal a witness. Witness proof rules are
+structural: trace equivalence consumes witness, model, and lowering rows;
+witness satisfaction consumes witness, training, artifact, and executor rows.
 
 ## General Commands
 
@@ -74,15 +80,16 @@ entc bench benchmarks/graphics --modes interpret,ir,native --warmup 1 --iteratio
 
 ## Architecture
 
-The compiler produces certificate schema v6. Tensor rows add shape, dtype,
-gradient, layout, dataset, model, accelerator, and training contracts to the same
-proof-carrying path used by resources and machine contracts.
+The compiler produces certificate schema v7. Tensor rows add shape, dtype,
+gradient, layout, dataset, model, accelerator, training, canonical, artifact,
+lowering, executor, and witness contracts to the same proof-carrying path used
+by resources and machine contracts.
 
 | Crate | Responsibility |
 | --- | --- |
 | `ent-parser` / `ent-elab` | Parse `.ent` worlds and lower explicit rows into certificates |
 | `ent-kernel` / `ent-proof` | Check relation tables, domain rows, and proof scripts |
-| `ent-tensor` | Execute checked tensor model graphs with reverse-mode AD on CPU |
+| `ent-tensor` | Verify tensor manifests/witnesses and execute checked tensor graphs on CPU |
 | `ent-graphics` | Execute `.ent` graphics libraries and write deterministic images |
 | `ent-transform` | Apply verified workspace transforms |
 | `ent-cli` | Shared command surface for check, build, tensor bench, render, and doctor |

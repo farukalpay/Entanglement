@@ -328,6 +328,7 @@ dependencies = [
  "ent-elab",
  "ent-kernel",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror",
 ]

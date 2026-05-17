@@ -44,6 +44,11 @@ pub struct WorldAst {
     pub datasets: Vec<DatasetDecl>,
     pub models: Vec<ModelDecl>,
     pub trainings: Vec<TrainingDecl>,
+    pub canonicals: Vec<CanonicalDecl>,
+    pub artifacts: Vec<ArtifactDecl>,
+    pub lowerings: Vec<LoweringDecl>,
+    pub executors: Vec<ExecutorDecl>,
+    pub witnesses: Vec<WitnessDecl>,
     pub machines: Vec<MachineDecl>,
     pub memories: Vec<MemoryDecl>,
     pub instructions: Vec<InstructionDecl>,
@@ -335,12 +340,74 @@ pub struct TrainingDecl {
     pub name: String,
     pub model: String,
     pub dataset: String,
+    pub artifact: Option<String>,
     pub accelerator: String,
     pub optimizer: String,
     pub learning_rate: f64,
     pub steps: u32,
     pub batch: u32,
     pub objective: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanonicalDecl {
+    pub name: String,
+    pub format: String,
+    pub fields: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactDecl {
+    pub name: String,
+    pub kind: String,
+    pub tensors: Vec<String>,
+    pub manifest: String,
+    pub digest: String,
+    pub canonical: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoweringDecl {
+    pub name: String,
+    pub model: String,
+    pub framework: String,
+    pub mappings: Vec<String>,
+    pub tolerance: f64,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutorDecl {
+    pub name: String,
+    pub framework: String,
+    pub module: String,
+    pub function: String,
+    pub device: String,
+    pub network: String,
+    pub seed: u64,
+    pub deterministic: bool,
+    pub read_artifacts: Vec<String>,
+    pub write_paths: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WitnessDecl {
+    pub name: String,
+    pub training: String,
+    pub artifact: String,
+    pub lowering: String,
+    pub executor: String,
+    pub manifest: String,
+    pub requirements: Vec<String>,
     pub evidence: String,
     pub span: SourceSpan,
 }
@@ -507,6 +574,11 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         datasets: vec![],
         models: vec![],
         trainings: vec![],
+        canonicals: vec![],
+        artifacts: vec![],
+        lowerings: vec![],
+        executors: vec![],
+        witnesses: vec![],
         machines: vec![],
         memories: vec![],
         instructions: vec![],
@@ -602,6 +674,21 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         } else if let Some(rest) = line.strip_prefix("training ") {
             ast.trainings
                 .push(parse_training(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("canonical ") {
+            ast.canonicals
+                .push(parse_canonical(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("artifact ") {
+            ast.artifacts
+                .push(parse_artifact(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("lowering ") {
+            ast.lowerings
+                .push(parse_lowering(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("executor ") {
+            ast.executors
+                .push(parse_executor(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("witness ") {
+            ast.witnesses
+                .push(parse_witness(rest, span).map_err(|error| diagnostic(error, span, line))?);
         } else if let Some(rest) = line.strip_prefix("machine ") {
             ast.machines
                 .push(parse_machine(rest, span).map_err(|error| diagnostic(error, span, line))?);
@@ -1699,7 +1786,21 @@ fn parse_training(rest: &str, span: SourceSpan) -> Result<TrainingDecl, ParseErr
     let dataset = words
         .next()
         .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
-    expect_word(words.next(), "accelerator", rest)?;
+    let next = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (artifact, next) = if next == "artifact" {
+        let artifact = words
+            .next()
+            .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+        let next = words
+            .next()
+            .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+        (Some(artifact.to_owned()), next)
+    } else {
+        (None, next)
+    };
+    expect_word(Some(next), "accelerator", rest)?;
     let accelerator = words
         .next()
         .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
@@ -1740,6 +1841,7 @@ fn parse_training(rest: &str, span: SourceSpan) -> Result<TrainingDecl, ParseErr
         name: name.to_owned(),
         model: model.to_owned(),
         dataset: dataset.to_owned(),
+        artifact,
         accelerator: accelerator.to_owned(),
         optimizer: optimizer.to_owned(),
         learning_rate,
@@ -1747,6 +1849,222 @@ fn parse_training(rest: &str, span: SourceSpan) -> Result<TrainingDecl, ParseErr
         batch,
         objective: objective.to_owned(),
         evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_canonical(rest: &str, span: SourceSpan) -> Result<CanonicalDecl, ParseError> {
+    let mut words = rest.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "format", rest)?;
+    let format = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "fields", rest)?;
+    let fields = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "evidence", rest)?;
+    let evidence = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(CanonicalDecl {
+        name: name.to_owned(),
+        format: format.to_owned(),
+        fields: parse_name_list(fields).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_artifact(rest: &str, span: SourceSpan) -> Result<ArtifactDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, canonical) = head
+        .rsplit_once(" canonical ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, digest) = split_quoted_tail(head, " digest ")?;
+    let (head, manifest) = split_quoted_tail(head, " manifest ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "kind", rest)?;
+    let kind = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "tensors", rest)?;
+    let tensors = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || canonical.trim().is_empty() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(ArtifactDecl {
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        tensors: parse_name_list(tensors).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        manifest,
+        digest,
+        canonical: canonical.trim().to_owned(),
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_lowering(rest: &str, span: SourceSpan) -> Result<LoweringDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, tolerance) = head
+        .rsplit_once(" tolerance ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, mappings) = head
+        .rsplit_once(" mappings ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "model", rest)?;
+    let model = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "framework", rest)?;
+    let framework = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    let tolerance = tolerance
+        .trim()
+        .trim_start_matches("abs=")
+        .parse::<f64>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    Ok(LoweringDecl {
+        name: name.to_owned(),
+        model: model.to_owned(),
+        framework: framework.to_owned(),
+        mappings: parse_argv(mappings.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        tolerance,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_executor(rest: &str, span: SourceSpan) -> Result<ExecutorDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, write_paths) = head
+        .rsplit_once(" write ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, read_artifacts) = head
+        .rsplit_once(" read ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, function) = take_quoted_field(head, " function ")?;
+    let (head, module) = take_quoted_field(&head, " module ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "framework", rest)?;
+    let framework = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "device", rest)?;
+    let device = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "network", rest)?;
+    let network = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "seed", rest)?;
+    let seed = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u64>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "deterministic", rest)?;
+    let deterministic = match words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+    {
+        "true" => true,
+        "false" => false,
+        _ => return Err(ParseError::Malformed(rest.to_owned())),
+    };
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(ExecutorDecl {
+        name: name.to_owned(),
+        framework: framework.to_owned(),
+        module,
+        function,
+        device: device.to_owned(),
+        network: network.to_owned(),
+        seed,
+        deterministic,
+        read_artifacts: parse_name_list(read_artifacts.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        write_paths: parse_argv(write_paths.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_witness(rest: &str, span: SourceSpan) -> Result<WitnessDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, requirements) = head
+        .rsplit_once(" require ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, manifest) = split_quoted_tail(head, " manifest ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "training", rest)?;
+    let training = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "artifact", rest)?;
+    let artifact = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "lowering", rest)?;
+    let lowering = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "executor", rest)?;
+    let executor = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(WitnessDecl {
+        name: name.to_owned(),
+        training: training.to_owned(),
+        artifact: artifact.to_owned(),
+        lowering: lowering.to_owned(),
+        executor: executor.to_owned(),
+        manifest,
+        requirements: parse_argv(requirements.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
         span,
     })
 }
@@ -2247,6 +2565,44 @@ fn split_quoted_tail<'a>(input: &'a str, marker: &str) -> Result<(&'a str, Strin
         head.trim_end(),
         parse_quoted(value.trim()).map_err(|_| ParseError::Malformed(input.to_owned()))?,
     ))
+}
+
+fn take_quoted_field(input: &str, marker: &str) -> Result<(String, String), ParseError> {
+    let start = input
+        .find(marker)
+        .ok_or_else(|| ParseError::Malformed(input.to_owned()))?;
+    let before = input[..start].trim_end();
+    let after_marker = &input[start + marker.len()..];
+    let after_marker = after_marker.trim_start();
+    let Some(body) = after_marker.strip_prefix('"') else {
+        return Err(ParseError::Malformed(input.to_owned()));
+    };
+    let mut escaped = false;
+    for (idx, ch) in body.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            let quoted = &after_marker[..idx + 2];
+            let value =
+                parse_quoted(quoted).map_err(|_| ParseError::Malformed(input.to_owned()))?;
+            let remaining = body[idx + 1..].trim_start();
+            let mut head = before.to_owned();
+            if !remaining.is_empty() {
+                if !head.is_empty() {
+                    head.push(' ');
+                }
+                head.push_str(remaining);
+            }
+            return Ok((head, value));
+        }
+    }
+    Err(ParseError::Malformed(input.to_owned()))
 }
 
 fn expect_word(found: Option<&str>, expected: &str, source: &str) -> Result<(), ParseError> {

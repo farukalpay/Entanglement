@@ -4,7 +4,10 @@ use ent_core::{BackendKind, CERTIFICATE_SCHEMA_VERSION};
 use ent_elab::elaborate_source;
 use ent_graphics::{bench_path, render_file, RenderMode, RenderOptions};
 use ent_kernel::verify;
-use ent_tensor::{run_tensor_benchmark, TensorBenchOptions};
+use ent_tensor::{
+    generate_python_binding, run_tensor_benchmark, verify_artifact_manifest, verify_witness,
+    TensorBenchOptions,
+};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -118,6 +121,30 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    VerifyArtifact {
+        source: PathBuf,
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    VerifyWitness {
+        source: PathBuf,
+        witness: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    Bind {
+        source: PathBuf,
+        #[arg(long)]
+        target: BindingTarget,
+        #[arg(long)]
+        framework: String,
+        #[arg(long, short)]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     Doctor {
         #[arg(long)]
         json: bool,
@@ -147,6 +174,11 @@ enum GraphicsMode {
     Interpret,
     Ir,
     Native,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum BindingTarget {
+    Python,
 }
 
 impl From<GraphicsMode> for RenderMode {
@@ -378,6 +410,61 @@ fn main() -> Result<()> {
                 );
             }
         }
+        Command::VerifyArtifact {
+            source,
+            manifest,
+            json,
+        } => {
+            let report = verify_artifact_manifest(&source, manifest.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "ARTIFACT OK world={} artifact={} tensors={}",
+                    report.world,
+                    report.artifact,
+                    report.tensors.len()
+                );
+            }
+        }
+        Command::VerifyWitness {
+            source,
+            witness,
+            json,
+        } => {
+            let report = verify_witness(&source, &witness)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "WITNESS OK world={} witness={} trace_ops={}",
+                    report.world,
+                    report.witness,
+                    report.trace_ops.len()
+                );
+            }
+        }
+        Command::Bind {
+            source,
+            target,
+            framework,
+            output,
+            json,
+        } => {
+            let report = match target {
+                BindingTarget::Python => generate_python_binding(&source, &output, &framework)?,
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "BIND OK world={} target=python framework={} output={}",
+                    report.world,
+                    report.framework,
+                    report.output.display()
+                );
+            }
+        }
         Command::Doctor { json } => {
             let report = doctor_report();
             if json {
@@ -434,6 +521,9 @@ fn doctor_report() -> Value {
             "check": "entc check path/to/main.ent",
             "build_cpu": "entc build path/to/main.ent --target linux-cpu --output build/main.entgraph",
             "tensor_bench": "entc tensor-bench path/to/model.ent --json",
+            "verify_artifact": "entc verify-artifact path/to/model.ent --json",
+            "bind_python": "entc bind path/to/model.ent --target python --framework pytorch_fx --output build/ent_contract.py",
+            "verify_witness": "entc verify-witness path/to/model.ent artifacts/run.witness.json --json",
         },
         "editor": {
             "vscode_extension": format!("{workspace}/tooling/vscode/entanglement"),

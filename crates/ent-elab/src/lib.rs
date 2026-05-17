@@ -1,12 +1,13 @@
 use ent_core::{
-    AbiContract, AcceleratorContract, AdContract, BackendContract, BenchmarkContract, Certificate,
-    DatasetContract, Endianness, ExternalContract, GraphicContract, InstructionContract,
-    InvariantContract, KernelFormula, Label, MachineContract, MachineMemoryModel, MemoryContract,
+    AbiContract, AcceleratorContract, AdContract, ArtifactContract, BackendContract,
+    BenchmarkContract, CanonicalContract, Certificate, DatasetContract, Endianness,
+    ExecutorContract, ExternalContract, GraphicContract, InstructionContract, InvariantContract,
+    KernelFormula, Label, LoweringContract, MachineContract, MachineMemoryModel, MemoryContract,
     MemoryPermission, MemoryRegion, ModelContract, ParserContract, ProbabilityContract,
     ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
     RenderPipelineContract, RenderTargetContract, ResourceAccess, ResourceContract,
     SelectionContract, StateId, TensorContract, TextReplacement, TrainingContract,
-    TransformContract, TransformTarget, ValidatorContract, WorkspaceContract,
+    TransformContract, TransformTarget, ValidatorContract, WitnessContract, WorkspaceContract,
     CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
 };
 use ent_parser::{
@@ -173,6 +174,11 @@ pub fn elaborate_ast(ast: &WorldAst) -> Result<Certificate, ElabError> {
         datasets: explicit_datasets(ast)?,
         models: explicit_models(ast)?,
         trainings: explicit_trainings(ast)?,
+        canonicals: explicit_canonicals(ast)?,
+        artifacts: explicit_artifacts(ast)?,
+        lowerings: explicit_lowerings(ast)?,
+        executors: explicit_executors(ast)?,
+        witnesses: explicit_witnesses(ast)?,
         machines: explicit_machines(ast)?,
         memory: explicit_memory(ast)?,
         instructions: explicit_instructions(ast)?,
@@ -490,12 +496,104 @@ fn explicit_trainings(ast: &WorldAst) -> Result<Vec<TrainingContract>, ElabError
                 name: decl.name.clone(),
                 model: decl.model.clone(),
                 dataset: decl.dataset.clone(),
+                artifact: decl.artifact.clone(),
                 accelerator: decl.accelerator.clone(),
                 optimizer: decl.optimizer.clone(),
                 learning_rate: decl.learning_rate,
                 steps: decl.steps,
                 batch: decl.batch,
                 objective: decl.objective.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_canonicals(ast: &WorldAst) -> Result<Vec<CanonicalContract>, ElabError> {
+    ast.canonicals
+        .iter()
+        .map(|decl| {
+            require_evidence("canonical", &decl.name, &decl.evidence)?;
+            Ok(CanonicalContract {
+                name: decl.name.clone(),
+                format: decl.format.clone(),
+                fields: decl.fields.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_artifacts(ast: &WorldAst) -> Result<Vec<ArtifactContract>, ElabError> {
+    ast.artifacts
+        .iter()
+        .map(|decl| {
+            require_evidence("artifact", &decl.name, &decl.evidence)?;
+            Ok(ArtifactContract {
+                name: decl.name.clone(),
+                kind: decl.kind.clone(),
+                tensors: decl.tensors.clone(),
+                manifest: decl.manifest.clone(),
+                digest: decl.digest.clone(),
+                canonical: decl.canonical.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_lowerings(ast: &WorldAst) -> Result<Vec<LoweringContract>, ElabError> {
+    ast.lowerings
+        .iter()
+        .map(|decl| {
+            require_evidence("lowering", &decl.name, &decl.evidence)?;
+            Ok(LoweringContract {
+                name: decl.name.clone(),
+                model: decl.model.clone(),
+                framework: decl.framework.clone(),
+                mappings: decl.mappings.clone(),
+                tolerance: decl.tolerance,
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_executors(ast: &WorldAst) -> Result<Vec<ExecutorContract>, ElabError> {
+    ast.executors
+        .iter()
+        .map(|decl| {
+            require_evidence("executor", &decl.name, &decl.evidence)?;
+            Ok(ExecutorContract {
+                name: decl.name.clone(),
+                framework: decl.framework.clone(),
+                module: decl.module.clone(),
+                function: decl.function.clone(),
+                device: decl.device.clone(),
+                network: decl.network.clone(),
+                seed: decl.seed,
+                deterministic: decl.deterministic,
+                read_artifacts: decl.read_artifacts.clone(),
+                write_paths: decl.write_paths.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_witnesses(ast: &WorldAst) -> Result<Vec<WitnessContract>, ElabError> {
+    ast.witnesses
+        .iter()
+        .map(|decl| {
+            require_evidence("witness", &decl.name, &decl.evidence)?;
+            Ok(WitnessContract {
+                name: decl.name.clone(),
+                training: decl.training.clone(),
+                artifact: decl.artifact.clone(),
+                lowering: decl.lowering.clone(),
+                executor: decl.executor.clone(),
+                manifest: decl.manifest.clone(),
+                requirements: decl.requirements.clone(),
                 evidence: decl.evidence.clone(),
             })
         })

@@ -107,6 +107,37 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
     after
         .trainings
         .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .canonicals
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for canonical in &mut after.canonicals {
+        canonical.fields.sort();
+    }
+    after
+        .artifacts
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for artifact in &mut after.artifacts {
+        artifact.tensors.sort();
+    }
+    after
+        .lowerings
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for lowering in &mut after.lowerings {
+        lowering.mappings.sort();
+    }
+    after
+        .executors
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for executor in &mut after.executors {
+        executor.read_artifacts.sort();
+        executor.write_paths.sort();
+    }
+    after
+        .witnesses
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for witness in &mut after.witnesses {
+        witness.requirements.sort();
+    }
     after.machines.sort_by(|left, right| left.id.cmp(&right.id));
     after
         .memory
@@ -139,7 +170,7 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
 
     let verification = verify(&after)?;
     Ok(RewriteProof {
-        name: "canonicalize-certificate-v6".to_owned(),
+        name: "canonicalize-certificate-v7".to_owned(),
         before: cert.clone(),
         after,
         verification,
