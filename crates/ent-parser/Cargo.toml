@@ -1,0 +1,10 @@
+[package]
+name = "ent-parser"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ent-core = { path = "../ent-core" }
+ent-proof = { path = "../ent-proof" }
+thiserror.workspace = true

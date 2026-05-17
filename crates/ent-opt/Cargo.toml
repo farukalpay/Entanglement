@@ -1,0 +1,11 @@
+[package]
+name = "ent-opt"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ent-core = { path = "../ent-core" }
+ent-kernel = { path = "../ent-kernel" }
+thiserror.workspace = true
+

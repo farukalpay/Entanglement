@@ -1,0 +1,122 @@
+world RepoCleanup(agent Operator, space Workspace) {
+  state tree : Resource
+  state syntax : Semantic
+
+  workspace repo uses filesystem write evidence repo_boundary
+  parser rust language rust via tree-sitter evidence rust_parser_contract
+  parser c language c via tree-sitter evidence c_parser_contract
+  parser cpp language cpp via tree-sitter evidence cpp_parser_contract
+  parser ent language ent via native evidence ent_parser_contract
+  document markdown via pulldown_cmark evidence markdown_contract
+
+  select native_code = files where parsed_by(rust, c, cpp) evidence native_parser_coverage
+  select rust_code = files where parsed_by(rust) evidence rust_parser_coverage
+  select ent_code = files where parsed_by(ent) evidence ent_parser_coverage
+  select removable_docs = files where markdown_heading("Remove Me") evidence markdown_heading_scope
+
+  transform strip_native_comments remove_comments on native_code evidence native_comment_ranges
+  transform strip_ent_comments remove_comments on ent_code evidence ent_comment_ranges
+  transform flatten_rust flatten_modules on rust_code into "flat" evidence rust_module_rewrite
+  transform drop_docs delete_files on removable_docs evidence doc_delete
+  transform readme_lines delete_lines on file("README.md") where contains_word("legacy") evidence line_delete
+  transform rename_readme replace_word on file("README.md") from "old" to "new" evidence word_replace
+  validator build argv ["cargo", "test"] evidence build_still_passes
+
+  theorem rust_parser : parser_admissible(rust)
+  theorem c_parser : parser_admissible(c)
+  theorem cpp_parser : parser_admissible(cpp)
+  theorem ent_parser : parser_admissible(ent)
+  theorem markdown_parser : parser_admissible(markdown)
+  theorem native_selection : selection_admissible(native_code)
+  theorem rust_selection : selection_admissible(rust_code)
+  theorem ent_selection : selection_admissible(ent_code)
+  theorem doc_selection : selection_admissible(removable_docs)
+  theorem native_comments_safe : transform_admissible(strip_native_comments)
+  theorem ent_comments_safe : transform_admissible(strip_ent_comments)
+  theorem flatten_safe : transform_admissible(flatten_rust)
+  theorem drop_safe : transform_admissible(drop_docs)
+  theorem line_safe : transform_admissible(readme_lines)
+  theorem rename_safe : transform_admissible(rename_readme)
+  theorem build_safe : validator_admissible(build)
+
+  proof rust_parser {
+    let row = row parser rust
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof c_parser {
+    let row = row parser c
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cpp_parser {
+    let row = row parser cpp
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof ent_parser {
+    let row = row parser ent
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof markdown_parser {
+    let row = row parser markdown
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof native_selection {
+    let row = row selection native_code
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof rust_selection {
+    let row = row selection rust_code
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof ent_selection {
+    let row = row selection ent_code
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof doc_selection {
+    let row = row selection removable_docs
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof native_comments_safe {
+    let row = row transform strip_native_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof ent_comments_safe {
+    let row = row transform strip_ent_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof flatten_safe {
+    let row = row transform flatten_rust
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof drop_safe {
+    let row = row transform drop_docs
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof line_safe {
+    let row = row transform readme_lines
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof rename_safe {
+    let row = row transform rename_readme
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof build_safe {
+    let row = row validator build
+    let fact = rule validator_admissible_from_validator(row)
+    qed fact
+  }
+}

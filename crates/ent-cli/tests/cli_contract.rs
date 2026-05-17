@@ -1,0 +1,507 @@
+use std::fs;
+use std::process::Command;
+
+fn entc_command() -> Command {
+    if let Some(candidate) = std::env::var("CARGO_BIN_EXE_entc")
+        .ok()
+        .filter(|path| std::path::Path::new(path).exists())
+    {
+        Command::new(candidate)
+    } else {
+        let mut command = Command::new(env!("CARGO"));
+        command.args(["run", "-q", "-p", "ent-cli", "--"]);
+        command
+    }
+}
+
+#[test]
+fn entc_emits_certificate_and_builds_runtime_bundle() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("simulation.ent");
+    fs::write(
+        &source,
+        r#"
+world Simulation(agent A, space X) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<A>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+  invariant auth_preserved(heap) before 1.0 after 1.0 tolerance 0.0 evidence auth_trace
+  effect put uses heap write evidence heap_put_single_writer
+  evolve put(dt: f32) by metal differentiable evidence metal_put_contract
+  ad put tangent d_put adjoint adj_put law identity evidence put_ad_contract
+  evolve secure_eval(dt: f32) by private-ane evidence ane_secure_contract
+  measure branch_prob weights allow=0.5, deny=0.5 tolerance 0.000001 evidence branch_mass_trace
+  theorem causal_step : dev_frame(step)
+  theorem linear_heap : resource_linear(heap)
+  theorem branch_mass : probability_normalizes(branch_prob)
+  theorem auth_ok : invariant_preserved(auth_preserved)
+  theorem put_backend : backend_admissible(put)
+  theorem secure_backend : backend_admissible(secure_eval)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof linear_heap {
+    let row = row resource heap
+    let fact = rule resource_linear_from_resource(row)
+    qed fact
+  }
+  proof branch_mass {
+    let row = row probability branch_prob
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof auth_ok {
+    let row = row invariant auth_preserved
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof put_backend {
+    let row = row backend put
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+  proof secure_backend {
+    let row = row backend secure_eval
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("write source");
+
+    let cert = temp.path().join("cert.json");
+    let check = entc_command()
+        .args(["check", source.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc check");
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_json: serde_json::Value =
+        serde_json::from_slice(&check.stdout).expect("check --json should print report JSON");
+    assert_eq!(check_json["world"], "Simulation");
+    assert_eq!(check_json["checked_rows"]["proofs"], 6);
+
+    let emit = entc_command()
+        .args([
+            "emit-cert",
+            source.to_str().unwrap(),
+            "--output",
+            cert.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc emit-cert");
+    assert!(
+        emit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&emit.stderr)
+    );
+    assert!(cert.exists());
+
+    let bundle = temp.path().join(".entgraph");
+    let build = entc_command()
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "--target",
+            "apple-m4-metal",
+            "--ane",
+            "private",
+            "--output",
+            bundle.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc build");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    assert!(bundle.join("cert.json").exists());
+    assert!(bundle.join("graph.json").exists());
+    assert!(bundle.join("manifest.json").exists());
+    assert!(bundle.join("kernels/put.metal").exists());
+    assert!(bundle.join("ane/secure_eval.mil").exists());
+    assert!(bundle.join("checksums.sha256").exists());
+    assert!(!bundle.join("render").exists());
+
+    let graph: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(bundle.join("graph.json")).expect("graph json"))
+            .expect("parse graph json");
+    assert_eq!(graph["requires_private_ane"], true);
+    assert_eq!(graph["nodes"][0]["backend"], "metal");
+    assert_eq!(graph["nodes"][1]["backend"], "private-ane");
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
+    )
+    .expect("parse manifest json");
+    assert_eq!(manifest["schema_version"], 4);
+    assert_eq!(manifest["target"]["platform"], "apple-silicon-macos");
+    assert!(manifest["source_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert!(manifest["certificate_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert!(manifest["verification_report_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(
+        manifest["backend_capabilities"][1]["capability"],
+        "private-ane"
+    );
+    assert_eq!(
+        manifest["artifact_checksums"]["graph.json"],
+        graph_hash(&bundle)
+    );
+
+    let verify_bundle = entc_command()
+        .args(["verify-bundle", bundle.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc verify-bundle");
+    assert!(
+        verify_bundle.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verify_bundle.stderr)
+    );
+    let verify_json: serde_json::Value =
+        serde_json::from_slice(&verify_bundle.stdout).expect("verify-bundle json");
+    assert_eq!(verify_json["world"], "Simulation");
+    assert_eq!(verify_json["schema_version"], 4);
+    assert_eq!(verify_json["certificate_version"], 4);
+    assert_eq!(verify_json["artifact_count"], 5);
+    assert_eq!(verify_json["target"]["platform"], "apple-silicon-macos");
+}
+
+#[test]
+fn entc_builds_linux_cpu_bundle_without_ane_substitution() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("cpu.ent");
+    fs::write(
+        &source,
+        r#"
+world CpuOnly(agent A) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<A>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+  invariant truth_preserved(truth) before 1.0 after 1.0 tolerance 0.0 evidence truth_trace
+  effect eval uses heap read evidence heap_eval_reader
+  evolve eval(dt: f32) by cpu evidence cpu_eval_contract
+  measure branch_prob weights done=1.0 tolerance 0.000001 evidence deterministic_mass_trace
+  theorem causal_step : dev_frame(step)
+  theorem mass_branch : probability_normalizes(branch_prob)
+  theorem truth_ok : invariant_preserved(truth_preserved)
+  theorem eval_backend : backend_admissible(eval)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof mass_branch {
+    let row = row probability branch_prob
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof truth_ok {
+    let row = row invariant truth_preserved
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof eval_backend {
+    let row = row backend eval
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("write source");
+
+    let bundle = temp.path().join("cpu.entgraph");
+    let build = entc_command()
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "--target",
+            "linux-cpu",
+            "--ane",
+            "off",
+            "--output",
+            bundle.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc linux build");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let graph: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(bundle.join("graph.json")).expect("graph json"))
+            .expect("parse graph json");
+    assert_eq!(graph["requires_private_ane"], false);
+    assert_eq!(graph["nodes"][0]["backend"], "cpu");
+    assert!(!bundle.join("ane").exists());
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
+    )
+    .expect("parse manifest json");
+    assert_eq!(manifest["target"]["platform"], "linux");
+    assert_eq!(manifest["backend_capabilities"][0]["capability"], "cpu");
+}
+
+#[test]
+fn entc_accepts_explicit_external_boundary_example() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let source = workspace.join("examples/proof-gap.ent");
+    let check = entc_command()
+        .args(["check", source.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc check");
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_json: serde_json::Value =
+        serde_json::from_slice(&check.stdout).expect("check --json should print report JSON");
+    assert_eq!(check_json["checked_rows"]["external_capabilities"], 1);
+    assert_eq!(check_json["checked_rows"]["proofs"], 2);
+
+    let bundle = temp.path().join("external.entgraph");
+    let build = entc_command()
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "--target",
+            "apple-m4-metal",
+            "--ane",
+            "off",
+            "--output",
+            bundle.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc build");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
+    )
+    .expect("parse manifest json");
+    assert_eq!(manifest["external_capabilities"][0]["name"], "ffi");
+    assert_eq!(
+        manifest["external_capabilities"][0]["evidence"],
+        "ffi_manifest_trace"
+    );
+}
+
+#[test]
+fn entc_machine_check_runs_rocq_backed_riscv_contract() {
+    if Command::new("coqc").arg("-v").output().is_err() {
+        return;
+    }
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let source = workspace.join("examples/riscv-core.ent");
+
+    let machine_check = entc_command()
+        .args(["machine-check", source.to_str().unwrap(), "--json"])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc machine-check");
+    assert!(
+        machine_check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&machine_check.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&machine_check.stdout).expect("machine-check JSON");
+    assert_eq!(report["world"], "RiscVCore");
+    assert_eq!(report["checked_rows"]["machines"], 1);
+    assert_eq!(report["checked_rows"]["instructions"], 1);
+    assert_eq!(report["proof_artifacts"][0]["checked"], true);
+
+    let stress = entc_command()
+        .args(["stress", "examples", "--json"])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc stress");
+    assert!(
+        stress.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stress.stderr)
+    );
+    let stress_report: serde_json::Value =
+        serde_json::from_slice(&stress.stdout).expect("stress JSON");
+    assert!(stress_report["files_checked"].as_u64().unwrap() >= 1);
+    assert!(
+        stress_report["negative_mutations_rejected"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+}
+
+#[test]
+fn entc_verify_bundle_rejects_tampered_artifacts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("cpu.ent");
+    fs::write(
+        &source,
+        r#"
+world CpuOnly(agent A) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<A>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+  invariant truth_preserved(truth) before 1.0 after 1.0 tolerance 0.0 evidence truth_trace
+  effect eval uses heap read evidence heap_eval_reader
+  evolve eval(dt: f32) by cpu evidence cpu_eval_contract
+  measure branch_prob weights done=1.0 tolerance 0.000001 evidence deterministic_mass_trace
+  theorem causal_step : dev_frame(step)
+  theorem mass_branch : probability_normalizes(branch_prob)
+  theorem truth_ok : invariant_preserved(truth_preserved)
+  theorem eval_backend : backend_admissible(eval)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof mass_branch {
+    let row = row probability branch_prob
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof truth_ok {
+    let row = row invariant truth_preserved
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof eval_backend {
+    let row = row backend eval
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("write source");
+
+    let bundle = temp.path().join("cpu.entgraph");
+    let build = entc_command()
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "--target",
+            "linux-cpu",
+            "--ane",
+            "off",
+            "--output",
+            bundle.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc build");
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    fs::write(bundle.join("graph.json"), "{\"tampered\":true}\n").expect("tamper graph");
+    let verify_bundle = entc_command()
+        .args(["verify-bundle", bundle.to_str().unwrap()])
+        .output()
+        .expect("run entc verify-bundle");
+    assert!(!verify_bundle.status.success());
+    assert!(String::from_utf8_lossy(&verify_bundle.stderr).contains("checksum mismatch"));
+}
+
+#[test]
+fn entc_apply_executes_verified_workspace_transform() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).expect("repo");
+    fs::write(repo.join("README.md"), "keep\nremove legacy\n").expect("readme");
+    let source = temp.path().join("cleanup.ent");
+    fs::write(
+        &source,
+        r#"
+world CliCleanup(agent Operator) {
+  state tree : Resource
+  workspace repo uses filesystem write evidence repo_boundary
+  select readme = files where file("README.md") evidence explicit_file
+  transform cleanup delete_lines on file("README.md") where contains_word("legacy") evidence line_delete
+  theorem readme_selection : selection_admissible(readme)
+  theorem cleanup_safe : transform_admissible(cleanup)
+  proof readme_selection {
+    let row = row selection readme
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof cleanup_safe {
+    let row = row transform cleanup
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("source");
+
+    let apply = entc_command()
+        .args([
+            "apply",
+            source.to_str().unwrap(),
+            "--repo",
+            repo.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("run entc apply");
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("apply --json report");
+    assert_eq!(report["world"], "CliCleanup");
+    assert_eq!(report["changed_files"][0]["path"], "README.md");
+    assert_eq!(
+        fs::read_to_string(repo.join("README.md")).unwrap(),
+        "keep\n"
+    );
+}
+
+fn graph_hash(bundle: &std::path::Path) -> serde_json::Value {
+    let checksum_rows =
+        fs::read_to_string(bundle.join("checksums.sha256")).expect("checksums should exist");
+    let graph_row = checksum_rows
+        .lines()
+        .find(|line| line.ends_with("  graph.json"))
+        .expect("graph checksum row");
+    serde_json::Value::String(format!("sha256:{}", &graph_row[..64]))
+}

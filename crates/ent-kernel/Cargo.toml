@@ -1,0 +1,15 @@
+[package]
+name = "ent-kernel"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ent-core = { path = "../ent-core" }
+ent-proof = { path = "../ent-proof" }
+indexmap.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

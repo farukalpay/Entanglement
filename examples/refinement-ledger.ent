@@ -1,0 +1,43 @@
+world RefinementLedger(agent Source, agent Target) {
+  state truth : Semantic
+  state artifact : Resource
+  relation refine[c: Set<Source>] preserves truth changes artifact[c]
+  law refine[c] ; refine[d] == refine[c union d]
+
+  invariant artifact_matches_spec(artifact) before 1.0 after 1.0 tolerance 0.0 evidence artifact_spec_trace
+  effect compile uses artifact write evidence artifact_compile_single_writer
+  evolve compile(dt: f32) by metal differentiable evidence metal_compile_contract
+  ad compile tangent d_compile adjoint adj_compile law identity evidence compile_ad_contract
+  measure proof_search weights found=0.4, deferred=0.6 tolerance 0.000001 evidence proof_search_mass_trace
+
+  theorem refinement_is_causal : dev_frame(refine)
+  theorem artifact_single_writer : resource_linear(artifact)
+  theorem search_mass_closed : probability_normalizes(proof_search)
+  theorem spec_preserved : invariant_preserved(artifact_matches_spec)
+  theorem backend_checked : backend_admissible(compile)
+  proof refinement_is_causal {
+    let row = row relation refine
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof artifact_single_writer {
+    let row = row resource artifact
+    let fact = rule resource_linear_from_resource(row)
+    qed fact
+  }
+  proof search_mass_closed {
+    let row = row probability proof_search
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof spec_preserved {
+    let row = row invariant artifact_matches_spec
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof backend_checked {
+    let row = row backend compile
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+}

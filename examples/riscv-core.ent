@@ -1,0 +1,37 @@
+world RiscVCore(agent Verifier) {
+  state machine_state : Semantic
+
+  machine rv64 isa riscv profile rv64imac word 64 endian little memory rvwmo via sail source "riscv/sail-riscv@adopted-formal-model" digest "sha256:8168545f5b6539e656716b970aa2b101a557ef1e37f45cbf42ad73c6b4b37670" evidence rv64_sail_source
+  memory host for rv64 address 64 order rvwmo region "ram:0x0:0x1000:read-write" frame "x-registers,pc" evidence host_memory_frame
+  proof-artifact rv64_rocq prover rocq module "proofs/rocq/EntanglementRiscV.v" digest "sha256:d9c118f713688605f18c50cbc090181dd74d3bbc530566473a9c860b2ba5405d" obligations [rv64_rocq,rv64,host,add,windows_x64] evidence coqc_checked
+  instruction add in rv64 mnemonic "ADD" encoding "rv64-r-type-add" semantics sail("ADD") effects "read:rs1,read:rs2,write:rd" proof rv64_rocq evidence add_sail_semantics
+  abi windows_x64 for rv64 target "x86_64-pc-windows-msvc" object pe-coff calling win64 external explicit evidence windows_x64_boundary
+
+  theorem artifact_checked : proof_artifact_checked(rv64_rocq)
+  theorem rv64_checked : machine_admissible(rv64)
+  theorem host_memory_checked : memory_admissible(host)
+  theorem add_refines : instruction_refines(add)
+  theorem windows_boundary_checked : abi_admissible(windows_x64)
+
+  proof artifact_checked {
+    let row = row proof-artifact rv64_rocq
+    let fact = rule proof_artifact_checked_from_artifact(row)
+    qed fact
+  }
+  proof rv64_checked {
+    rocq module "proofs/rocq/EntanglementRiscV.v"
+    qed checked
+  }
+  proof host_memory_checked {
+    rocq module "proofs/rocq/EntanglementRiscV.v"
+    qed checked
+  }
+  proof add_refines {
+    rocq module "proofs/rocq/EntanglementRiscV.v"
+    qed checked
+  }
+  proof windows_boundary_checked {
+    rocq module "proofs/rocq/EntanglementRiscV.v"
+    qed checked
+  }
+}

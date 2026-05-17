@@ -1,0 +1,26 @@
+world ProofGap(agent Client, agent Runtime) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<Client>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+
+  invariant auth_preserved(heap) before 1.0 after 1.0 tolerance 0.0 evidence auth_trace
+  effect put uses heap write evidence heap_put_single_writer
+  evolve put(dt: f32) by metal differentiable evidence metal_put_contract
+  ad put tangent d_put adjoint adj_put law identity evidence put_ad_contract
+  measure branch_prob weights allow=0.5, deny=0.5 tolerance 0.000001 evidence branch_mass_trace
+  external ffi interface runtime_call uses heap read evidence ffi_manifest_trace
+
+  theorem causal_step : dev_frame(step)
+  theorem ffi_boundary : external_admissible(ffi)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof ffi_boundary {
+    let row = row external ffi
+    let fact = rule external_admissible_from_external(row)
+    qed fact
+  }
+}

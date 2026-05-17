@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "crates/ent-core",
+    "crates/ent-proof",
+    "crates/ent-kernel",
+    "crates/ent-parser",
+    "crates/ent-elab",
+    "crates/ent-opt",
+    "crates/ent-transform",
+    "crates/ent-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+indexmap = { version = "2", features = ["serde"] }
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+streaming-iterator = "0.1"
+tempfile = "3"
+thiserror = "2"
+tree-sitter = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-rust = "0.23"
+pulldown-cmark = "0.12"

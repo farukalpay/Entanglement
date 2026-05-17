@@ -1,0 +1,57 @@
+world CapabilityStore(agent Client, agent Runtime) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<Client>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+
+  invariant auth_preserved(heap) before 1.0 after 1.0 tolerance 0.0 evidence auth_trace
+  effect put uses heap write evidence heap_put_single_writer
+  evolve put(dt: f32) by metal differentiable evidence metal_put_contract
+  ad put tangent d_put adjoint adj_put law identity evidence put_ad_contract
+  evolve secure_eval(dt: f32) by private-ane evidence ane_secure_contract
+  measure branch_prob weights allow=0.5, deny=0.5 tolerance 0.000001 evidence branch_mass_trace
+  external ffi interface runtime_call uses heap read evidence ffi_manifest_trace
+
+  theorem causal_step : dev_frame(step)
+  theorem linear_heap : resource_linear(heap)
+  theorem branch_mass : probability_normalizes(branch_prob)
+  theorem auth_ok : invariant_preserved(auth_preserved)
+  theorem put_backend : backend_admissible(put)
+  theorem secure_backend : backend_admissible(secure_eval)
+  theorem ffi_boundary : external_admissible(ffi)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof linear_heap {
+    let row = row resource heap
+    let fact = rule resource_linear_from_resource(row)
+    qed fact
+  }
+  proof branch_mass {
+    let row = row probability branch_prob
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof auth_ok {
+    let row = row invariant auth_preserved
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof put_backend {
+    let row = row backend put
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+  proof secure_backend {
+    let row = row backend secure_eval
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+  proof ffi_boundary {
+    let row = row external ffi
+    let fact = rule external_admissible_from_external(row)
+    qed fact
+  }
+}

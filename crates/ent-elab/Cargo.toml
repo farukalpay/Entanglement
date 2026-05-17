@@ -1,0 +1,13 @@
+[package]
+name = "ent-elab"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ent-core = { path = "../ent-core" }
+ent-parser = { path = "../ent-parser" }
+thiserror.workspace = true
+
+[dev-dependencies]
+ent-kernel = { path = "../ent-kernel" }

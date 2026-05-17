@@ -1,0 +1,36 @@
+world CpuAudit(agent Auditor) {
+  state truth : Semantic
+  state heap : Resource
+  relation step[c: Set<Auditor>] preserves truth changes heap[c]
+  law step[c] ; step[d] == step[c union d]
+
+  invariant truth_preserved(truth) before 1.0 after 1.0 tolerance 0.0 evidence truth_trace
+  effect eval uses heap read evidence heap_eval_reader
+  evolve eval(dt: f32) by cpu evidence cpu_eval_contract
+  measure branch_prob weights done=1.0 tolerance 0.000001 evidence deterministic_mass_trace
+
+  theorem causal_step : dev_frame(step)
+  theorem mass_branch : probability_normalizes(branch_prob)
+  theorem truth_ok : invariant_preserved(truth_preserved)
+  theorem eval_backend : backend_admissible(eval)
+  proof causal_step {
+    let row = row relation step
+    let fact = rule dev_frame_from_relation(row)
+    qed fact
+  }
+  proof mass_branch {
+    let row = row probability branch_prob
+    let fact = rule probability_normalizes_from_probability(row)
+    qed fact
+  }
+  proof truth_ok {
+    let row = row invariant truth_preserved
+    let fact = rule invariant_preserved_from_invariant(row)
+    qed fact
+  }
+  proof eval_backend {
+    let row = row backend eval
+    let fact = rule backend_admissible_from_backend(row)
+    qed fact
+  }
+}

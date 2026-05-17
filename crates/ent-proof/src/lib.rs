@@ -1,0 +1,538 @@
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use thiserror::Error;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PropositionKind {
+    DevFrame,
+    ResourceLinear,
+    ProbabilityNormalizes,
+    InvariantPreserved,
+    BackendAdmissible,
+    ExternalAdmissible,
+    MachineAdmissible,
+    MemoryAdmissible,
+    InstructionRefines,
+    AbiAdmissible,
+    ProofArtifactChecked,
+    ParserAdmissible,
+    SelectionAdmissible,
+    TransformAdmissible,
+    ValidatorAdmissible,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Proposition {
+    pub kind: PropositionKind,
+    pub subject: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum RowKind {
+    Relation,
+    Resource,
+    Probability,
+    Invariant,
+    Backend,
+    External,
+    Machine,
+    Memory,
+    Instruction,
+    Abi,
+    ProofArtifact,
+    Parser,
+    Selection,
+    Transform,
+    Validator,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PrimitiveRule {
+    DevFrameFromRelation,
+    ResourceLinearFromResource,
+    ProbabilityNormalizesFromProbability,
+    InvariantPreservedFromInvariant,
+    BackendAdmissibleFromBackend,
+    ExternalAdmissibleFromExternal,
+    MachineAdmissibleFromMachine,
+    MemoryAdmissibleFromMemory,
+    InstructionRefinesFromInstruction,
+    AbiAdmissibleFromAbi,
+    ProofArtifactCheckedFromArtifact,
+    ParserAdmissibleFromParser,
+    SelectionAdmissibleFromSelection,
+    TransformAdmissibleFromTransform,
+    ValidatorAdmissibleFromValidator,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofStatement {
+    BindRow {
+        name: String,
+        kind: RowKind,
+        subject: String,
+    },
+    ApplyRule {
+        name: String,
+        rule: PrimitiveRule,
+        args: Vec<String>,
+    },
+    UseRocq {
+        module: String,
+    },
+    Qed {
+        value: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProofScript {
+    pub theorem: String,
+    pub statements: Vec<ProofStatement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProofCertificate {
+    pub name: String,
+    pub proposition: Proposition,
+    pub script: ProofScript,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ProofParseError {
+    #[error("malformed proposition: {0}")]
+    MalformedProposition(String),
+    #[error("unknown proposition operator: {0}")]
+    UnknownProposition(String),
+    #[error("malformed proof statement: {0}")]
+    MalformedStatement(String),
+    #[error("unknown row kind: {0}")]
+    UnknownRowKind(String),
+    #[error("unknown primitive rule: {0}")]
+    UnknownRule(String),
+}
+
+pub fn parse_proposition(input: &str) -> Result<Proposition, ProofParseError> {
+    let open = input
+        .find('(')
+        .ok_or_else(|| ProofParseError::MalformedProposition(input.to_owned()))?;
+    let close = input
+        .rfind(')')
+        .ok_or_else(|| ProofParseError::MalformedProposition(input.to_owned()))?;
+    if close <= open || !input[close + 1..].trim().is_empty() {
+        return Err(ProofParseError::MalformedProposition(input.to_owned()));
+    }
+    let operator = input[..open].trim();
+    let subject = input[open + 1..close].trim();
+    if subject.is_empty() {
+        return Err(ProofParseError::MalformedProposition(input.to_owned()));
+    }
+    let kind = match operator {
+        "dev_frame" => PropositionKind::DevFrame,
+        "resource_linear" => PropositionKind::ResourceLinear,
+        "probability_normalizes" => PropositionKind::ProbabilityNormalizes,
+        "invariant_preserved" => PropositionKind::InvariantPreserved,
+        "backend_admissible" => PropositionKind::BackendAdmissible,
+        "external_admissible" => PropositionKind::ExternalAdmissible,
+        "machine_admissible" => PropositionKind::MachineAdmissible,
+        "memory_admissible" => PropositionKind::MemoryAdmissible,
+        "instruction_refines" => PropositionKind::InstructionRefines,
+        "abi_admissible" => PropositionKind::AbiAdmissible,
+        "proof_artifact_checked" => PropositionKind::ProofArtifactChecked,
+        "parser_admissible" => PropositionKind::ParserAdmissible,
+        "selection_admissible" => PropositionKind::SelectionAdmissible,
+        "transform_admissible" => PropositionKind::TransformAdmissible,
+        "validator_admissible" => PropositionKind::ValidatorAdmissible,
+        _ => return Err(ProofParseError::UnknownProposition(operator.to_owned())),
+    };
+    Ok(Proposition {
+        kind,
+        subject: subject.to_owned(),
+    })
+}
+
+pub fn parse_script(theorem: &str, body: &str) -> Result<ProofScript, ProofParseError> {
+    let mut statements = Vec::new();
+    for line in body.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        statements.push(parse_statement(line)?);
+    }
+    Ok(ProofScript {
+        theorem: theorem.to_owned(),
+        statements,
+    })
+}
+
+fn parse_statement(line: &str) -> Result<ProofStatement, ProofParseError> {
+    if let Some(module) = line.strip_prefix("rocq module ") {
+        return Ok(ProofStatement::UseRocq {
+            module: parse_quoted(module.trim())
+                .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))?,
+        });
+    }
+
+    if let Some(value) = line.strip_prefix("qed ") {
+        let value = value.trim();
+        if value.is_empty() || value.split_whitespace().count() != 1 {
+            return Err(ProofParseError::MalformedStatement(line.to_owned()));
+        }
+        return Ok(ProofStatement::Qed {
+            value: value.to_owned(),
+        });
+    }
+
+    let Some(rest) = line.strip_prefix("let ") else {
+        return Err(ProofParseError::MalformedStatement(line.to_owned()));
+    };
+    let (name, expr) = rest
+        .split_once(" = ")
+        .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))?;
+    let name = name.trim();
+    if name.is_empty() || name.split_whitespace().count() != 1 {
+        return Err(ProofParseError::MalformedStatement(line.to_owned()));
+    }
+
+    if let Some(row) = expr.strip_prefix("row ") {
+        let mut words = row.split_whitespace();
+        let kind = words
+            .next()
+            .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))
+            .and_then(parse_row_kind)?;
+        let subject = words
+            .next()
+            .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))?;
+        if words.next().is_some() {
+            return Err(ProofParseError::MalformedStatement(line.to_owned()));
+        }
+        return Ok(ProofStatement::BindRow {
+            name: name.to_owned(),
+            kind,
+            subject: subject.to_owned(),
+        });
+    }
+
+    if let Some(rule) = expr.strip_prefix("rule ") {
+        let open = rule
+            .find('(')
+            .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))?;
+        let close = rule
+            .rfind(')')
+            .ok_or_else(|| ProofParseError::MalformedStatement(line.to_owned()))?;
+        if close <= open || !rule[close + 1..].trim().is_empty() {
+            return Err(ProofParseError::MalformedStatement(line.to_owned()));
+        }
+        let rule_name = rule[..open].trim();
+        let args = rule[open + 1..close]
+            .split(',')
+            .map(str::trim)
+            .filter(|arg| !arg.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        return Ok(ProofStatement::ApplyRule {
+            name: name.to_owned(),
+            rule: parse_rule(rule_name)?,
+            args,
+        });
+    }
+
+    Err(ProofParseError::MalformedStatement(line.to_owned()))
+}
+
+fn parse_row_kind(input: &str) -> Result<RowKind, ProofParseError> {
+    match input {
+        "relation" => Ok(RowKind::Relation),
+        "resource" => Ok(RowKind::Resource),
+        "probability" => Ok(RowKind::Probability),
+        "invariant" => Ok(RowKind::Invariant),
+        "backend" => Ok(RowKind::Backend),
+        "external" => Ok(RowKind::External),
+        "machine" => Ok(RowKind::Machine),
+        "memory" => Ok(RowKind::Memory),
+        "instruction" => Ok(RowKind::Instruction),
+        "abi" => Ok(RowKind::Abi),
+        "proof-artifact" => Ok(RowKind::ProofArtifact),
+        "parser" => Ok(RowKind::Parser),
+        "selection" => Ok(RowKind::Selection),
+        "transform" => Ok(RowKind::Transform),
+        "validator" => Ok(RowKind::Validator),
+        _ => Err(ProofParseError::UnknownRowKind(input.to_owned())),
+    }
+}
+
+fn parse_rule(input: &str) -> Result<PrimitiveRule, ProofParseError> {
+    match input {
+        "dev_frame_from_relation" => Ok(PrimitiveRule::DevFrameFromRelation),
+        "resource_linear_from_resource" => Ok(PrimitiveRule::ResourceLinearFromResource),
+        "probability_normalizes_from_probability" => {
+            Ok(PrimitiveRule::ProbabilityNormalizesFromProbability)
+        }
+        "invariant_preserved_from_invariant" => Ok(PrimitiveRule::InvariantPreservedFromInvariant),
+        "backend_admissible_from_backend" => Ok(PrimitiveRule::BackendAdmissibleFromBackend),
+        "external_admissible_from_external" => Ok(PrimitiveRule::ExternalAdmissibleFromExternal),
+        "machine_admissible_from_machine" => Ok(PrimitiveRule::MachineAdmissibleFromMachine),
+        "memory_admissible_from_memory" => Ok(PrimitiveRule::MemoryAdmissibleFromMemory),
+        "instruction_refines_from_instruction" => {
+            Ok(PrimitiveRule::InstructionRefinesFromInstruction)
+        }
+        "abi_admissible_from_abi" => Ok(PrimitiveRule::AbiAdmissibleFromAbi),
+        "proof_artifact_checked_from_artifact" => {
+            Ok(PrimitiveRule::ProofArtifactCheckedFromArtifact)
+        }
+        "parser_admissible_from_parser" => Ok(PrimitiveRule::ParserAdmissibleFromParser),
+        "selection_admissible_from_selection" => {
+            Ok(PrimitiveRule::SelectionAdmissibleFromSelection)
+        }
+        "transform_admissible_from_transform" => {
+            Ok(PrimitiveRule::TransformAdmissibleFromTransform)
+        }
+        "validator_admissible_from_validator" => {
+            Ok(PrimitiveRule::ValidatorAdmissibleFromValidator)
+        }
+        _ => Err(ProofParseError::UnknownRule(input.to_owned())),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProofValue {
+    Row { kind: RowKind, subject: String },
+    Fact(Proposition),
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ProofCheckError {
+    #[error("proof script targets theorem {script_theorem}, expected {expected_theorem}")]
+    TheoremMismatch {
+        expected_theorem: String,
+        script_theorem: String,
+    },
+    #[error("proof script has no final qed")]
+    MissingQed,
+    #[error("qed must be the final proof statement")]
+    TrailingStatement,
+    #[error("proof binding is duplicated: {0}")]
+    DuplicateBinding(String),
+    #[error("proof variable is unknown: {0}")]
+    UnknownVariable(String),
+    #[error("certificate row is unavailable: {kind:?} {subject}")]
+    UnknownRow { kind: RowKind, subject: String },
+    #[error("rule {rule:?} expects one row argument")]
+    InvalidRuleArity { rule: PrimitiveRule },
+    #[error("rule {rule:?} cannot consume {kind:?}")]
+    WrongRowKind { rule: PrimitiveRule, kind: RowKind },
+    #[error("qed value is not a fact: {0}")]
+    QedNotFact(String),
+    #[error("proved proposition does not match theorem")]
+    PropositionMismatch {
+        expected: Proposition,
+        actual: Proposition,
+    },
+}
+
+pub trait ProofEnvironment {
+    fn has_row(&self, kind: &RowKind, subject: &str) -> bool;
+
+    fn has_rocq_artifact(&self, _module: &str, _proposition: &Proposition) -> bool {
+        false
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProofCheckReport {
+    pub checked_steps: usize,
+}
+
+pub fn check_proof(
+    theorem: &str,
+    proposition: &Proposition,
+    script: &ProofScript,
+    environment: &impl ProofEnvironment,
+) -> Result<ProofCheckReport, ProofCheckError> {
+    if script.theorem != theorem {
+        return Err(ProofCheckError::TheoremMismatch {
+            expected_theorem: theorem.to_owned(),
+            script_theorem: script.theorem.clone(),
+        });
+    }
+
+    let mut values = BTreeMap::new();
+    let mut checked_steps = 0;
+    let mut qed_value = None;
+
+    for (idx, statement) in script.statements.iter().enumerate() {
+        checked_steps += 1;
+        match statement {
+            ProofStatement::BindRow {
+                name,
+                kind,
+                subject,
+            } => {
+                if qed_value.is_some() {
+                    return Err(ProofCheckError::TrailingStatement);
+                }
+                if !environment.has_row(kind, subject) {
+                    return Err(ProofCheckError::UnknownRow {
+                        kind: kind.clone(),
+                        subject: subject.clone(),
+                    });
+                }
+                insert_binding(
+                    &mut values,
+                    name,
+                    ProofValue::Row {
+                        kind: kind.clone(),
+                        subject: subject.clone(),
+                    },
+                )?;
+            }
+            ProofStatement::ApplyRule { name, rule, args } => {
+                if qed_value.is_some() {
+                    return Err(ProofCheckError::TrailingStatement);
+                }
+                let fact = apply_rule(rule, args, &values)?;
+                insert_binding(&mut values, name, ProofValue::Fact(fact))?;
+            }
+            ProofStatement::UseRocq { module } => {
+                if qed_value.is_some() {
+                    return Err(ProofCheckError::TrailingStatement);
+                }
+                if !environment.has_rocq_artifact(module, proposition) {
+                    return Err(ProofCheckError::UnknownRow {
+                        kind: RowKind::ProofArtifact,
+                        subject: module.clone(),
+                    });
+                }
+                insert_binding(
+                    &mut values,
+                    "checked",
+                    ProofValue::Fact(proposition.clone()),
+                )?;
+            }
+            ProofStatement::Qed { value } => {
+                if idx + 1 != script.statements.len() {
+                    return Err(ProofCheckError::TrailingStatement);
+                }
+                qed_value = Some(value.clone());
+            }
+        }
+    }
+
+    let qed_value = qed_value.ok_or(ProofCheckError::MissingQed)?;
+    let actual = match values.get(&qed_value) {
+        Some(ProofValue::Fact(fact)) => fact.clone(),
+        Some(ProofValue::Row { .. }) => return Err(ProofCheckError::QedNotFact(qed_value)),
+        None => return Err(ProofCheckError::UnknownVariable(qed_value)),
+    };
+    if &actual != proposition {
+        return Err(ProofCheckError::PropositionMismatch {
+            expected: proposition.clone(),
+            actual,
+        });
+    }
+
+    Ok(ProofCheckReport { checked_steps })
+}
+
+fn insert_binding(
+    values: &mut BTreeMap<String, ProofValue>,
+    name: &str,
+    value: ProofValue,
+) -> Result<(), ProofCheckError> {
+    if values.insert(name.to_owned(), value).is_some() {
+        return Err(ProofCheckError::DuplicateBinding(name.to_owned()));
+    }
+    Ok(())
+}
+
+fn apply_rule(
+    rule: &PrimitiveRule,
+    args: &[String],
+    values: &BTreeMap<String, ProofValue>,
+) -> Result<Proposition, ProofCheckError> {
+    if args.len() != 1 {
+        return Err(ProofCheckError::InvalidRuleArity { rule: rule.clone() });
+    }
+    let arg = &args[0];
+    let Some(ProofValue::Row { kind, subject }) = values.get(arg) else {
+        return Err(ProofCheckError::UnknownVariable(arg.clone()));
+    };
+    let (expected_kind, proposition_kind) = rule_contract(rule);
+    if kind != &expected_kind {
+        return Err(ProofCheckError::WrongRowKind {
+            rule: rule.clone(),
+            kind: kind.clone(),
+        });
+    }
+    Ok(Proposition {
+        kind: proposition_kind,
+        subject: subject.clone(),
+    })
+}
+
+fn rule_contract(rule: &PrimitiveRule) -> (RowKind, PropositionKind) {
+    match rule {
+        PrimitiveRule::DevFrameFromRelation => (RowKind::Relation, PropositionKind::DevFrame),
+        PrimitiveRule::ResourceLinearFromResource => {
+            (RowKind::Resource, PropositionKind::ResourceLinear)
+        }
+        PrimitiveRule::ProbabilityNormalizesFromProbability => {
+            (RowKind::Probability, PropositionKind::ProbabilityNormalizes)
+        }
+        PrimitiveRule::InvariantPreservedFromInvariant => {
+            (RowKind::Invariant, PropositionKind::InvariantPreserved)
+        }
+        PrimitiveRule::BackendAdmissibleFromBackend => {
+            (RowKind::Backend, PropositionKind::BackendAdmissible)
+        }
+        PrimitiveRule::ExternalAdmissibleFromExternal => {
+            (RowKind::External, PropositionKind::ExternalAdmissible)
+        }
+        PrimitiveRule::MachineAdmissibleFromMachine => {
+            (RowKind::Machine, PropositionKind::MachineAdmissible)
+        }
+        PrimitiveRule::MemoryAdmissibleFromMemory => {
+            (RowKind::Memory, PropositionKind::MemoryAdmissible)
+        }
+        PrimitiveRule::InstructionRefinesFromInstruction => {
+            (RowKind::Instruction, PropositionKind::InstructionRefines)
+        }
+        PrimitiveRule::AbiAdmissibleFromAbi => (RowKind::Abi, PropositionKind::AbiAdmissible),
+        PrimitiveRule::ProofArtifactCheckedFromArtifact => (
+            RowKind::ProofArtifact,
+            PropositionKind::ProofArtifactChecked,
+        ),
+        PrimitiveRule::ParserAdmissibleFromParser => {
+            (RowKind::Parser, PropositionKind::ParserAdmissible)
+        }
+        PrimitiveRule::SelectionAdmissibleFromSelection => {
+            (RowKind::Selection, PropositionKind::SelectionAdmissible)
+        }
+        PrimitiveRule::TransformAdmissibleFromTransform => {
+            (RowKind::Transform, PropositionKind::TransformAdmissible)
+        }
+        PrimitiveRule::ValidatorAdmissibleFromValidator => {
+            (RowKind::Validator, PropositionKind::ValidatorAdmissible)
+        }
+    }
+}
+
+fn parse_quoted(input: &str) -> Option<String> {
+    let body = input.strip_prefix('"')?.strip_suffix('"')?;
+    let mut output = String::new();
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('"') => output.push('"'),
+                Some('\\') => output.push('\\'),
+                Some('n') => output.push('\n'),
+                Some(other) => {
+                    output.push('\\');
+                    output.push(other);
+                }
+                None => output.push('\\'),
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    Some(output)
+}

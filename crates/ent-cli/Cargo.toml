@@ -1,0 +1,24 @@
+[package]
+name = "ent-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "entc"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+ent-core = { path = "../ent-core" }
+ent-elab = { path = "../ent-elab" }
+ent-kernel = { path = "../ent-kernel" }
+ent-opt = { path = "../ent-opt" }
+ent-transform = { path = "../ent-transform" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
