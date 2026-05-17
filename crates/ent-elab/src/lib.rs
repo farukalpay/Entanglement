@@ -1,9 +1,11 @@
 use ent_core::{
-    AbiContract, AdContract, BackendContract, Certificate, Endianness, ExternalContract,
-    InstructionContract, InvariantContract, KernelFormula, Label, MachineContract,
-    MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion, ParserContract,
-    ProbabilityContract, ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
-    ResourceAccess, ResourceContract, SelectionContract, StateId, TextReplacement,
+    AbiContract, AcceleratorContract, AdContract, BackendContract, BenchmarkContract, Certificate,
+    DatasetContract, Endianness, ExternalContract, GraphicContract, InstructionContract,
+    InvariantContract, KernelFormula, Label, MachineContract, MachineMemoryModel, MemoryContract,
+    MemoryPermission, MemoryRegion, ModelContract, ParserContract, ProbabilityContract,
+    ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
+    RenderPipelineContract, RenderTargetContract, ResourceAccess, ResourceContract,
+    SelectionContract, StateId, TensorContract, TextReplacement, TrainingContract,
     TransformContract, TransformTarget, ValidatorContract, WorkspaceContract,
     CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
 };
@@ -11,6 +13,7 @@ use ent_parser::{
     parse_world_diagnostic, DimensionKind, EffectAccess, ParseDiagnostic, ParseError,
     TransformTargetDecl, WorldAst,
 };
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -161,6 +164,15 @@ pub fn elaborate_ast(ast: &WorldAst) -> Result<Certificate, ElabError> {
         selections: explicit_selections(ast)?,
         transforms: explicit_transforms(ast)?,
         validators: explicit_validators(ast)?,
+        graphics: explicit_graphics(ast)?,
+        render_targets: explicit_render_targets(ast)?,
+        render_pipelines: explicit_render_pipelines(ast)?,
+        benchmarks: explicit_benchmarks(ast)?,
+        tensors: explicit_tensors(ast)?,
+        accelerators: explicit_accelerators(ast)?,
+        datasets: explicit_datasets(ast)?,
+        models: explicit_models(ast)?,
+        trainings: explicit_trainings(ast)?,
         machines: explicit_machines(ast)?,
         memory: explicit_memory(ast)?,
         instructions: explicit_instructions(ast)?,
@@ -328,6 +340,162 @@ fn explicit_validators(ast: &WorldAst) -> Result<Vec<ValidatorContract>, ElabErr
             Ok(ValidatorContract {
                 name: decl.name.clone(),
                 argv: decl.argv.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_graphics(ast: &WorldAst) -> Result<Vec<GraphicContract>, ElabError> {
+    ast.graphics
+        .iter()
+        .map(|decl| {
+            require_evidence("graphics", &decl.name, &decl.evidence)?;
+            Ok(GraphicContract {
+                name: decl.name.clone(),
+                entry: decl.entry.clone(),
+                source_digest: format!("sha256:{}", sha256_hex(decl.body.as_bytes())),
+                imports: decl.imports.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_render_targets(ast: &WorldAst) -> Result<Vec<RenderTargetContract>, ElabError> {
+    ast.render_targets
+        .iter()
+        .map(|decl| {
+            require_evidence("render-target", &decl.name, &decl.evidence)?;
+            Ok(RenderTargetContract {
+                name: decl.name.clone(),
+                width: decl.width,
+                height: decl.height,
+                format: decl.format.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_render_pipelines(ast: &WorldAst) -> Result<Vec<RenderPipelineContract>, ElabError> {
+    ast.render_pipelines
+        .iter()
+        .map(|decl| {
+            require_evidence("render-pipeline", &decl.name, &decl.evidence)?;
+            Ok(RenderPipelineContract {
+                name: decl.name.clone(),
+                graphics: decl.graphics.clone(),
+                target: decl.target.clone(),
+                entry: decl.entry.clone(),
+                mode: decl.mode.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_benchmarks(ast: &WorldAst) -> Result<Vec<BenchmarkContract>, ElabError> {
+    ast.benchmarks
+        .iter()
+        .map(|decl| {
+            require_evidence("benchmark", &decl.name, &decl.evidence)?;
+            Ok(BenchmarkContract {
+                name: decl.name.clone(),
+                graphics: decl.graphics.clone(),
+                entry: decl.entry.clone(),
+                warmup: decl.warmup,
+                iterations: decl.iterations,
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_tensors(ast: &WorldAst) -> Result<Vec<TensorContract>, ElabError> {
+    ast.tensors
+        .iter()
+        .map(|decl| {
+            require_evidence("tensor", &decl.name, &decl.evidence)?;
+            Ok(TensorContract {
+                name: decl.name.clone(),
+                shape: decl.shape.clone(),
+                dtype: decl.dtype.clone(),
+                gradient: decl.gradient.clone(),
+                layout: decl.layout.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_accelerators(ast: &WorldAst) -> Result<Vec<AcceleratorContract>, ElabError> {
+    ast.accelerators
+        .iter()
+        .map(|decl| {
+            require_evidence("accelerator", &decl.name, &decl.evidence)?;
+            Ok(AcceleratorContract {
+                name: decl.name.clone(),
+                kind: decl.kind.clone(),
+                memory: decl.memory.clone(),
+                precision: decl.precision.clone(),
+                supports: decl.supports.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_datasets(ast: &WorldAst) -> Result<Vec<DatasetContract>, ElabError> {
+    ast.datasets
+        .iter()
+        .map(|decl| {
+            require_evidence("dataset", &decl.name, &decl.evidence)?;
+            Ok(DatasetContract {
+                name: decl.name.clone(),
+                tensors: decl.tensors.clone(),
+                source: decl.source.clone(),
+                source_digest: decl.source_digest.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_models(ast: &WorldAst) -> Result<Vec<ModelContract>, ElabError> {
+    ast.models
+        .iter()
+        .map(|decl| {
+            require_evidence("model", &decl.name, &decl.evidence)?;
+            Ok(ModelContract {
+                name: decl.name.clone(),
+                entry: decl.entry.clone(),
+                inputs: decl.inputs.clone(),
+                parameters: decl.parameters.clone(),
+                outputs: decl.outputs.clone(),
+                ops: decl.ops.clone(),
+                loss: decl.loss.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_trainings(ast: &WorldAst) -> Result<Vec<TrainingContract>, ElabError> {
+    ast.trainings
+        .iter()
+        .map(|decl| {
+            require_evidence("training", &decl.name, &decl.evidence)?;
+            Ok(TrainingContract {
+                name: decl.name.clone(),
+                model: decl.model.clone(),
+                dataset: decl.dataset.clone(),
+                accelerator: decl.accelerator.clone(),
+                optimizer: decl.optimizer.clone(),
+                learning_rate: decl.learning_rate,
+                steps: decl.steps,
+                batch: decl.batch,
+                objective: decl.objective.clone(),
                 evidence: decl.evidence.clone(),
             })
         })
@@ -517,6 +685,16 @@ fn require_evidence(kind: &'static str, name: &str, evidence: &str) -> Result<()
         });
     }
     Ok(())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn proofs(ast: &WorldAst) -> Result<Vec<ProofCertificate>, ElabError> {

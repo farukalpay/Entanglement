@@ -1,0 +1,18 @@
+module tensor.nn
+import tensor.core
+
+fn linear_flops(batch: f64, input: f64, output: f64) -> f64 {
+  return batch * input * output * 2.0
+}
+
+fn relu_flops(values: f64) -> f64 {
+  return values
+}
+
+fn softmax_cross_entropy_flops(batch: f64, classes: f64) -> f64 {
+  return batch * classes * 5.0
+}
+
+fn dense_classifier_flops(batch: f64, input: f64, hidden: f64, classes: f64) -> f64 {
+  return linear_flops(batch, input, hidden) + relu_flops(batch * hidden) + linear_flops(batch, hidden, classes) + softmax_cross_entropy_flops(batch, classes)
+}

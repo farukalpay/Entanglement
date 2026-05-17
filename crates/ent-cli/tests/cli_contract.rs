@@ -142,7 +142,7 @@ world Simulation(agent A, space X) {
         &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
     )
     .expect("parse manifest json");
-    assert_eq!(manifest["schema_version"], 4);
+    assert_eq!(manifest["schema_version"], 6);
     assert_eq!(manifest["target"]["platform"], "apple-silicon-macos");
     assert!(manifest["source_hash"]
         .as_str()
@@ -177,8 +177,8 @@ world Simulation(agent A, space X) {
     let verify_json: serde_json::Value =
         serde_json::from_slice(&verify_bundle.stdout).expect("verify-bundle json");
     assert_eq!(verify_json["world"], "Simulation");
-    assert_eq!(verify_json["schema_version"], 4);
-    assert_eq!(verify_json["certificate_version"], 4);
+    assert_eq!(verify_json["schema_version"], 6);
+    assert_eq!(verify_json["certificate_version"], 6);
     assert_eq!(verify_json["artifact_count"], 5);
     assert_eq!(verify_json["target"]["platform"], "apple-silicon-macos");
 }
@@ -264,6 +264,136 @@ world CpuOnly(agent A) {
 }
 
 #[test]
+fn entc_renders_previews_and_benchmarks_graphics_sources() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("graphics.ent");
+    fs::write(
+        &source,
+        r#"
+world GraphicsSmoke(agent Viewer) {
+  state pixels : Resource
+  graphics scene entry main evidence graphics_trace {
+    fn main() -> f64 {
+      begin_frame(width(), height())
+      clear(0.02, 0.03, 0.04)
+      draw_triangle(8.0, 8.0, 0.5, 0.9, 0.2, 0.2, 56.0, 12.0, 0.5, 0.2, 0.9, 0.2, 20.0, 50.0, 0.5, 0.2, 0.2, 0.9)
+      flush()
+      return 1.0
+    }
+  }
+  render-target frame width 64 height 64 format rgba8 evidence target_trace
+  render-pipeline pipe graphics scene target frame entry main mode native evidence pipe_trace
+  benchmark bench graphics scene entry main warmup 0 iterations 1 evidence bench_trace
+  theorem scene_ok : graphics_admissible(scene)
+  theorem target_ok : render_target_admissible(frame)
+  theorem pipe_ok : render_pipeline_admissible(pipe)
+  theorem bench_ok : benchmark_admissible(bench)
+  proof scene_ok {
+    let row = row graphics scene
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof target_ok {
+    let row = row render-target frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof pipe_ok {
+    let row = row render-pipeline pipe
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof bench_ok {
+    let row = row benchmark bench
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("write graphics source");
+
+    let output = temp.path().join("frame.ppm");
+    let render = entc_command()
+        .args([
+            "render",
+            source.to_str().unwrap(),
+            "--mode",
+            "native",
+            "--width",
+            "64",
+            "--height",
+            "64",
+            "--output",
+            output.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("run entc render");
+    assert!(
+        render.status.success(),
+        "{}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    assert!(output.exists());
+    let render_json: serde_json::Value =
+        serde_json::from_slice(&render.stdout).expect("render json");
+    assert_eq!(render_json["mode"], "native");
+    assert!(render_json["triangles_rasterized"].as_u64().unwrap() > 0);
+
+    let preview = entc_command()
+        .args([
+            "preview",
+            source.to_str().unwrap(),
+            "--mode",
+            "native",
+            "--width",
+            "64",
+            "--height",
+            "64",
+            "--smoke-test",
+            "--json",
+        ])
+        .output()
+        .expect("run entc preview");
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+
+    let bench_output = temp.path().join("bench.json");
+    let bench = entc_command()
+        .args([
+            "bench",
+            temp.path().to_str().unwrap(),
+            "--modes",
+            "interpret,ir,native",
+            "--warmup",
+            "0",
+            "--iterations",
+            "1",
+            "--width",
+            "64",
+            "--height",
+            "64",
+            "--output",
+            bench_output.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("run entc bench");
+    assert!(
+        bench.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bench.stderr)
+    );
+    assert!(bench_output.exists());
+    let bench_json: serde_json::Value = serde_json::from_slice(&bench.stdout).expect("bench json");
+    assert_eq!(bench_json["files"][0]["modes"].as_array().unwrap().len(), 3);
+}
+
+#[test]
 fn entc_accepts_explicit_external_boundary_example() {
     let temp = tempfile::tempdir().expect("tempdir");
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -314,6 +444,67 @@ fn entc_accepts_explicit_external_boundary_example() {
         manifest["external_capabilities"][0]["evidence"],
         "ffi_manifest_trace"
     );
+}
+
+#[test]
+fn entc_runs_tensor_benchmark_and_reports_editor_tooling() {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let source = workspace.join("examples/tensor-xor.ent");
+
+    let check = entc_command()
+        .args(["check", source.to_str().unwrap(), "--json"])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc check");
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_json: serde_json::Value = serde_json::from_slice(&check.stdout).expect("check json");
+    assert_eq!(check_json["checked_rows"]["tensors"], 8);
+    assert_eq!(check_json["checked_rows"]["trainings"], 1);
+
+    let tensor_bench = entc_command()
+        .args([
+            "tensor-bench",
+            source.to_str().unwrap(),
+            "--iterations",
+            "1",
+            "--json",
+        ])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc tensor-bench");
+    assert!(
+        tensor_bench.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tensor_bench.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&tensor_bench.stdout).expect("tensor bench JSON");
+    assert_eq!(report["backend"]["executor"], "ent-tensor-cpu");
+    assert!(
+        report["runs"][0]["final_loss"].as_f64().unwrap()
+            < report["runs"][0]["first_loss"].as_f64().unwrap()
+    );
+
+    let doctor = entc_command()
+        .args(["doctor", "--json"])
+        .current_dir(workspace)
+        .output()
+        .expect("run entc doctor");
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let doctor_json: serde_json::Value =
+        serde_json::from_slice(&doctor.stdout).expect("doctor JSON");
+    assert_eq!(doctor_json["editor"]["file_extensions"][0], ".ent");
 }
 
 #[test]

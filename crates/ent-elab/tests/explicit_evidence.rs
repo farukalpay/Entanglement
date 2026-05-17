@@ -76,7 +76,7 @@ fn parser_preserves_source_spans_and_evidence_rows() {
 }
 
 #[test]
-fn elaborator_produces_certificate_v4_without_synthetic_evidence() {
+fn elaborator_produces_current_certificate_without_synthetic_evidence() {
     let cert = elaborate_source(EXPLICIT_SOURCE).expect("explicit evidence should elaborate");
 
     assert_eq!(cert.version, CERTIFICATE_SCHEMA_VERSION);

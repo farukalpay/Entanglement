@@ -1,0 +1,56 @@
+world TerrainMeshBench(agent Viewer, space Screen) {
+  state pixels : Resource
+
+  graphics terrain_mesh entry main evidence terrain_mesh_graphics_contract {
+    import graphics.terrain
+
+    fn main() -> f64 {
+      let grid: f64 = 40.0
+      let extent: f64 = 72.0
+      let step: f64 = extent / grid
+      let seed: f64 = 59.0
+      let total: f64 = 0.0
+      for zi in range(0, grid) {
+        for xi in range(0, grid) {
+          let x: f64 = -extent * 0.5 + xi * step
+          let z: f64 = -extent * 0.5 + zi * step
+          total = total + mountain_height(x, z, seed)
+        }
+      }
+      begin_frame(width(), height())
+      clear(clamp(total * 0.00001 + 0.05, 0.0, 1.0), 0.08, 0.10)
+      flush()
+      return total
+    }
+  }
+
+  render-target terrain_frame width 640 height 360 format rgba8 evidence terrain_target_contract
+  render-pipeline terrain_pipeline graphics terrain_mesh target terrain_frame entry main mode ir evidence terrain_pipeline_contract
+  benchmark terrain_benchmark graphics terrain_mesh entry main warmup 5 iterations 30 evidence terrain_benchmark_contract
+
+  theorem terrain_graphics : graphics_admissible(terrain_mesh)
+  theorem terrain_target : render_target_admissible(terrain_frame)
+  theorem terrain_pipeline : render_pipeline_admissible(terrain_pipeline)
+  theorem terrain_bench : benchmark_admissible(terrain_benchmark)
+
+  proof terrain_graphics {
+    let row = row graphics terrain_mesh
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof terrain_target {
+    let row = row render-target terrain_frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof terrain_pipeline {
+    let row = row render-pipeline terrain_pipeline
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof terrain_bench {
+    let row = row benchmark terrain_benchmark
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}

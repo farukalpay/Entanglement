@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use ent_core::{BackendKind, CERTIFICATE_SCHEMA_VERSION};
 use ent_elab::elaborate_source;
+use ent_graphics::{bench_path, render_file, RenderMode, RenderOptions};
 use ent_kernel::verify;
+use ent_tensor::{run_tensor_benchmark, TensorBenchOptions};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -66,20 +68,95 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    Render {
+        source: PathBuf,
+        #[arg(long, default_value = "native")]
+        mode: GraphicsMode,
+        #[arg(long)]
+        width: u32,
+        #[arg(long)]
+        height: u32,
+        #[arg(long, short)]
+        output: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    Preview {
+        source: PathBuf,
+        #[arg(long, default_value = "native")]
+        mode: GraphicsMode,
+        #[arg(long)]
+        width: u32,
+        #[arg(long)]
+        height: u32,
+        #[arg(long)]
+        smoke_test: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Bench {
+        path: PathBuf,
+        #[arg(long, default_value = "interpret,ir,native")]
+        modes: String,
+        #[arg(long, default_value_t = 5)]
+        warmup: u32,
+        #[arg(long, default_value_t = 30)]
+        iterations: u32,
+        #[arg(long, default_value_t = 640)]
+        width: u32,
+        #[arg(long, default_value_t = 360)]
+        height: u32,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    TensorBench {
+        source: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        iterations: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
 enum Target {
     #[value(name = "apple-m4-metal")]
     AppleM4Metal,
+    #[value(name = "macos-cpu")]
+    MacosCpu,
     #[value(name = "linux-cpu")]
     LinuxCpu,
+    #[value(name = "windows-cpu")]
+    WindowsCpu,
 }
 
 #[derive(Clone, Debug, ValueEnum, PartialEq, Eq)]
 enum AneMode {
     Off,
     Private,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum GraphicsMode {
+    Interpret,
+    Ir,
+    Native,
+}
+
+impl From<GraphicsMode> for RenderMode {
+    fn from(value: GraphicsMode) -> Self {
+        match value {
+            GraphicsMode::Interpret => RenderMode::Interpret,
+            GraphicsMode::Ir => RenderMode::Ir,
+            GraphicsMode::Native => RenderMode::Native,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -195,8 +272,175 @@ fn main() -> Result<()> {
                 );
             }
         }
+        Command::Render {
+            source,
+            mode,
+            width,
+            height,
+            output,
+            json,
+        } => {
+            let mode = RenderMode::from(mode);
+            let report = render_file(
+                &source,
+                RenderOptions {
+                    mode,
+                    width,
+                    height,
+                    output: Some(output),
+                    source_path: Some(source.clone()),
+                    library_roots: vec![],
+                    smoke_test: true,
+                },
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "RENDER OK world={} mode={} triangles={} pixels={}",
+                    report.world,
+                    report.mode.label(),
+                    report.triangles_rasterized,
+                    report.pixels_touched
+                );
+            }
+        }
+        Command::Preview {
+            source,
+            mode,
+            width,
+            height,
+            smoke_test,
+            json,
+        } => {
+            let mode = RenderMode::from(mode);
+            let report = render_file(
+                &source,
+                RenderOptions {
+                    mode,
+                    width,
+                    height,
+                    output: None,
+                    source_path: Some(source.clone()),
+                    library_roots: vec![],
+                    smoke_test,
+                },
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "PREVIEW OK world={} mode={} triangles={}",
+                    report.world,
+                    report.mode.label(),
+                    report.triangles_rasterized
+                );
+            }
+        }
+        Command::Bench {
+            path,
+            modes,
+            warmup,
+            iterations,
+            width,
+            height,
+            output,
+            json,
+        } => {
+            let modes = parse_graphics_modes(&modes)?;
+            let report = bench_path(&path, &modes, warmup, iterations, width, height)?;
+            if let Some(output) = output {
+                write_json(&output, &report)?;
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                let file_count = report.files.len();
+                println!("BENCH OK files={file_count} modes={}", modes.len());
+            }
+        }
+        Command::TensorBench {
+            source,
+            iterations,
+            json,
+        } => {
+            let report = run_tensor_benchmark(&source, TensorBenchOptions { iterations })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                let last = report
+                    .runs
+                    .last()
+                    .context("tensor benchmark produced no runs")?;
+                println!(
+                    "TENSOR OK world={} training={} final_loss={:.6} executor={}",
+                    report.world, report.training, last.final_loss, report.backend.executor
+                );
+            }
+        }
+        Command::Doctor { json } => {
+            let report = doctor_report();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "ENTC platform={} arch={} targets={} extension={}",
+                    report["host"]["os"],
+                    report["host"]["arch"],
+                    report["targets"].as_array().map_or(0, Vec::len),
+                    report["editor"]["vscode_extension"]
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn parse_graphics_modes(input: &str) -> Result<Vec<RenderMode>> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .map(|mode| match mode {
+            "interpret" => Ok(RenderMode::Interpret),
+            "ir" => Ok(RenderMode::Ir),
+            "native" => Ok(RenderMode::Native),
+            other => anyhow::bail!("unsupported graphics mode: {other}"),
+        })
+        .collect()
+}
+
+fn doctor_report() -> Value {
+    let workspace = std::env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_owned());
+    json!({
+        "host": {
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+        },
+        "toolchain": {
+            "entc": env!("CARGO_PKG_VERSION"),
+            "rustc": rustc_version(),
+        },
+        "targets": [
+            target_manifest(&Target::MacosCpu),
+            target_manifest(&Target::LinuxCpu),
+            target_manifest(&Target::WindowsCpu),
+            target_manifest(&Target::AppleM4Metal),
+        ],
+        "commands": {
+            "check": "entc check path/to/main.ent",
+            "build_cpu": "entc build path/to/main.ent --target linux-cpu --output build/main.entgraph",
+            "tensor_bench": "entc tensor-bench path/to/model.ent --json",
+        },
+        "editor": {
+            "vscode_extension": format!("{workspace}/tooling/vscode/entanglement"),
+            "language_id": "entanglement",
+            "file_extensions": [".ent"],
+        }
+    })
 }
 
 fn load_and_elaborate(path: &Path) -> Result<ent_core::Certificate> {
@@ -244,6 +488,18 @@ fn emit_bundle(
             "requires_private_ane": cert.backends.iter().any(|backend| matches!(&backend.backend, BackendKind::PrivateAne)),
             "verified_rows": report.checked_rows,
             "external_capabilities": external_capability_rows(cert),
+            "tensors": &cert.tensors,
+            "accelerators": &cert.accelerators,
+            "datasets": cert.datasets.iter().map(|dataset| {
+                json!({
+                    "name": &dataset.name,
+                    "tensors": &dataset.tensors,
+                    "source_digest": &dataset.source_digest,
+                    "evidence": &dataset.evidence,
+                })
+            }).collect::<Vec<_>>(),
+            "models": &cert.models,
+            "trainings": &cert.trainings,
             "nodes": nodes,
         }),
     )?;
@@ -299,6 +555,12 @@ fn emit_bundle(
                     "admissible": backend.admissible,
                 })
             }).collect::<Vec<_>>(),
+            "tensor_capabilities": {
+                "tensors": &cert.tensors,
+                "accelerators": &cert.accelerators,
+                "models": &cert.models,
+                "trainings": &cert.trainings,
+            },
             "external_capabilities": external_capability_rows(cert),
             "artifact_checksums": artifact_checksums,
         }),
@@ -328,9 +590,9 @@ fn validate_target_backend_policy(
                 );
             }
         }
-        Target::LinuxCpu => {
+        Target::MacosCpu | Target::LinuxCpu | Target::WindowsCpu => {
             if has_private_ane || has_non_cpu || ane != &AneMode::Off {
-                anyhow::bail!("linux-cpu target accepts only CPU backends and --ane off");
+                anyhow::bail!("portable CPU targets accept only CPU backends and --ane off");
             }
         }
     }
@@ -639,7 +901,9 @@ fn external_capability_rows(cert: &ent_core::Certificate) -> Vec<Value> {
 fn target_label(target: &Target) -> &'static str {
     match target {
         Target::AppleM4Metal => "apple-m4-metal",
+        Target::MacosCpu => "macos-cpu",
         Target::LinuxCpu => "linux-cpu",
+        Target::WindowsCpu => "windows-cpu",
     }
 }
 
@@ -657,9 +921,19 @@ fn target_manifest(target: &Target) -> Value {
             "platform": "apple-silicon-macos",
             "architecture": "arm64",
         }),
+        Target::MacosCpu => json!({
+            "id": "macos-cpu",
+            "platform": "macos",
+            "architecture": "portable-cpu",
+        }),
         Target::LinuxCpu => json!({
             "id": "linux-cpu",
             "platform": "linux",
+            "architecture": "portable-cpu",
+        }),
+        Target::WindowsCpu => json!({
+            "id": "windows-cpu",
+            "platform": "windows",
             "architecture": "portable-cpu",
         }),
     }

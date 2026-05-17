@@ -1,0 +1,9 @@
+[package]
+name = "ent-native-gfx"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ent-graphics = { path = "../ent-graphics" }

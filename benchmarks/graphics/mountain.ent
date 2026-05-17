@@ -1,0 +1,57 @@
+world MountainBench(agent Viewer, space Screen) {
+  state pixels : Resource
+
+  graphics mountain_scene entry main evidence mountain_graphics_contract {
+    import graphics.raster
+
+    fn main() -> f64 {
+      let w: f64 = width()
+      let h: f64 = height()
+      let grid: f64 = 24.0
+      let extent: f64 = 60.0
+      let step: f64 = extent / grid
+      let seed: f64 = 41.0
+      begin_frame(w, h)
+      clear(0.035, 0.045, 0.060)
+      for zi in range(0, grid) {
+        for xi in range(0, grid) {
+          let world_x: f64 = -extent * 0.5 + xi * step
+          let world_z: f64 = -extent * 0.5 + zi * step
+          draw_mountain_cell(world_x, world_z, step, seed, w, h)
+        }
+      }
+      flush()
+      return 1.0
+    }
+  }
+
+  render-target bench_frame width 640 height 360 format rgba8 evidence bench_target_contract
+  render-pipeline bench_pipeline graphics mountain_scene target bench_frame entry main mode native evidence bench_pipeline_contract
+  benchmark mountain_benchmark graphics mountain_scene entry main warmup 5 iterations 30 evidence mountain_benchmark_contract
+
+  theorem mountain_graphics : graphics_admissible(mountain_scene)
+  theorem bench_target : render_target_admissible(bench_frame)
+  theorem bench_pipeline : render_pipeline_admissible(bench_pipeline)
+  theorem mountain_bench : benchmark_admissible(mountain_benchmark)
+
+  proof mountain_graphics {
+    let row = row graphics mountain_scene
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof bench_target {
+    let row = row render-target bench_frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof bench_pipeline {
+    let row = row render-pipeline bench_pipeline
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof mountain_bench {
+    let row = row benchmark mountain_benchmark
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}

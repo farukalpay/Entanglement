@@ -1,0 +1,27 @@
+module tensor.core
+
+fn tensor_rank_2(rows: f64, cols: f64) -> f64 {
+  return rows * cols
+}
+
+fn tensor_numel_1(a: f64) -> f64 {
+  return a
+}
+
+fn tensor_numel_2(a: f64, b: f64) -> f64 {
+  return a * b
+}
+
+fn tensor_can_matmul(left_cols: f64, right_rows: f64) -> f64 {
+  if left_cols == right_rows {
+    return 1.0
+  }
+  return 0.0
+}
+
+fn tensor_can_broadcast_row(batch_rows: f64, left_cols: f64, right_rows: f64, right_cols: f64) -> f64 {
+  if right_rows == 1.0 && left_cols == right_cols {
+    return batch_rows
+  }
+  return 0.0
+}

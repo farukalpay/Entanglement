@@ -1,9 +1,11 @@
 use ent_core::{
-    AbiContract, AdContract, BackendContract, Certificate, Endianness, InstabilityKind,
-    InstructionContract, KernelFormula, Label, MachineContract, MachineMemoryModel, MemoryContract,
-    MemoryPermission, MemoryRegion, ParserContract, ProgramState, ProofArtifact, ProofCertificate,
-    ProverKind, RelationTable, ResourceAccess, SelectionContract, StateId, TransformContract,
-    TransformTarget, ValidatorContract, WorkspaceContract, CERTIFICATE_SCHEMA_VERSION,
+    AbiContract, AdContract, BackendContract, BenchmarkContract, Certificate, Endianness,
+    GraphicContract, InstabilityKind, InstructionContract, KernelFormula, Label, MachineContract,
+    MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion, ParserContract,
+    ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
+    RenderPipelineContract, RenderTargetContract, ResourceAccess, SelectionContract, StateId,
+    TransformContract, TransformTarget, ValidatorContract, WorkspaceContract,
+    CERTIFICATE_SCHEMA_VERSION,
 };
 use ent_kernel::{verify, KernelError};
 use ent_proof::{
@@ -58,6 +60,15 @@ fn accepting_certificate() -> Certificate {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        graphics: vec![],
+        render_targets: vec![],
+        render_pipelines: vec![],
+        benchmarks: vec![],
+        tensors: vec![],
+        accelerators: vec![],
+        datasets: vec![],
+        models: vec![],
+        trainings: vec![],
         machines: vec![],
         memory: vec![],
         instructions: vec![],
@@ -322,6 +333,98 @@ fn accepts_proved_workspace_transform_contracts() {
 }
 
 #[test]
+fn accepts_proved_graphics_contracts() {
+    let mut cert = accepting_certificate();
+    cert.graphics.push(GraphicContract {
+        name: "scene".into(),
+        entry: "main".into(),
+        source_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .into(),
+        imports: vec!["graphics.raster".into()],
+        evidence: "scene_trace".into(),
+    });
+    cert.render_targets.push(RenderTargetContract {
+        name: "frame".into(),
+        width: 640,
+        height: 360,
+        format: "rgba8".into(),
+        evidence: "target_trace".into(),
+    });
+    cert.render_pipelines.push(RenderPipelineContract {
+        name: "pipe".into(),
+        graphics: "scene".into(),
+        target: "frame".into(),
+        entry: "main".into(),
+        mode: "native".into(),
+        evidence: "pipe_trace".into(),
+    });
+    cert.benchmarks.push(BenchmarkContract {
+        name: "bench".into(),
+        graphics: "scene".into(),
+        entry: "main".into(),
+        warmup: 1,
+        iterations: 2,
+        evidence: "bench_trace".into(),
+    });
+    cert.proofs.push(proof(
+        "scene_ok",
+        PropositionKind::GraphicsAdmissible,
+        "scene",
+        RowKind::Graphics,
+        PrimitiveRule::GraphicsAdmissibleFromGraphics,
+    ));
+    cert.proofs.push(proof(
+        "target_ok",
+        PropositionKind::RenderTargetAdmissible,
+        "frame",
+        RowKind::RenderTarget,
+        PrimitiveRule::RenderTargetAdmissibleFromRenderTarget,
+    ));
+    cert.proofs.push(proof(
+        "pipeline_ok",
+        PropositionKind::RenderPipelineAdmissible,
+        "pipe",
+        RowKind::RenderPipeline,
+        PrimitiveRule::RenderPipelineAdmissibleFromRenderPipeline,
+    ));
+    cert.proofs.push(proof(
+        "bench_ok",
+        PropositionKind::BenchmarkAdmissible,
+        "bench",
+        RowKind::Benchmark,
+        PrimitiveRule::BenchmarkAdmissibleFromBenchmark,
+    ));
+
+    let report = verify(&cert).expect("graphics contracts verify");
+    assert_eq!(report.checked_rows.graphics, 1);
+    assert_eq!(report.checked_rows.render_targets, 1);
+    assert_eq!(report.checked_rows.render_pipelines, 1);
+    assert_eq!(report.checked_rows.benchmarks, 1);
+}
+
+#[test]
+fn rejects_graphics_contract_without_proof() {
+    let mut cert = accepting_certificate();
+    cert.graphics.push(GraphicContract {
+        name: "scene".into(),
+        entry: "main".into(),
+        source_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .into(),
+        imports: vec![],
+        evidence: "scene_trace".into(),
+    });
+
+    let err = verify(&cert).expect_err("graphics rows require proof");
+    assert!(matches!(
+        err,
+        KernelError::Instability {
+            kind: InstabilityKind::ProofGap,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn rejects_workspace_transform_without_proof() {
     let mut cert = accepting_certificate();
     cert.parsers.push(ParserContract {
@@ -582,6 +685,15 @@ fn rejects_public_restriction_that_deletes_required_factor_midpoint() {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        graphics: vec![],
+        render_targets: vec![],
+        render_pipelines: vec![],
+        benchmarks: vec![],
+        tensors: vec![],
+        accelerators: vec![],
+        datasets: vec![],
+        models: vec![],
+        trainings: vec![],
         machines: vec![],
         memory: vec![],
         instructions: vec![],

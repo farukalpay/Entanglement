@@ -1,0 +1,52 @@
+module graphics.raster
+import graphics.terrain
+
+fn draw_mountain_cell(x: f64, z: f64, step: f64, seed: f64, width_value: f64, height_value: f64) -> f64 {
+  let x0: f64 = x
+  let z0: f64 = z
+  let x1: f64 = x + step
+  let z1: f64 = z + step
+  let center_x: f64 = x + step * 0.5
+  let center_z: f64 = z + step * 0.5
+  let center_distance: f64 = sqrt(center_x * center_x + center_z * center_z)
+  if center_distance > 35.0 {
+    return 0.0
+  }
+  let h00: f64 = mountain_height(x0, z0, seed)
+  let h10: f64 = mountain_height(x1, z0, seed)
+  let h01: f64 = mountain_height(x0, z1, seed)
+  let h11: f64 = mountain_height(x1, z1, seed)
+  let sx00: f64 = screen_x(x0, z0, width_value)
+  let sy00: f64 = screen_y(x0, h00, z0, height_value)
+  let sd00: f64 = screen_depth(x0, h00, z0)
+  let sx10: f64 = screen_x(x1, z0, width_value)
+  let sy10: f64 = screen_y(x1, h10, z0, height_value)
+  let sd10: f64 = screen_depth(x1, h10, z0)
+  let sx01: f64 = screen_x(x0, z1, width_value)
+  let sy01: f64 = screen_y(x0, h01, z1, height_value)
+  let sd01: f64 = screen_depth(x0, h01, z1)
+  let sx11: f64 = screen_x(x1, z1, width_value)
+  let sy11: f64 = screen_y(x1, h11, z1, height_value)
+  let sd11: f64 = screen_depth(x1, h11, z1)
+  let r00: f64 = shade_r(x0, z0, h00, seed)
+  let g00: f64 = shade_g(x0, z0, h00, seed)
+  let b00: f64 = shade_b(x0, z0, h00, seed)
+  let r10: f64 = shade_r(x1, z0, h10, seed)
+  let g10: f64 = shade_g(x1, z0, h10, seed)
+  let b10: f64 = shade_b(x1, z0, h10, seed)
+  let r01: f64 = shade_r(x0, z1, h01, seed)
+  let g01: f64 = shade_g(x0, z1, h01, seed)
+  let b01: f64 = shade_b(x0, z1, h01, seed)
+  let r11: f64 = shade_r(x1, z1, h11, seed)
+  let g11: f64 = shade_g(x1, z1, h11, seed)
+  let b11: f64 = shade_b(x1, z1, h11, seed)
+  if h00 + h11 > h10 + h01 {
+    draw_triangle(sx00, sy00, sd00, r00, g00, b00, sx10, sy10, sd10, r10, g10, b10, sx11, sy11, sd11, r11, g11, b11)
+    draw_triangle(sx00, sy00, sd00, r00, g00, b00, sx11, sy11, sd11, r11, g11, b11, sx01, sy01, sd01, r01, g01, b01)
+  }
+  else {
+    draw_triangle(sx10, sy10, sd10, r10, g10, b10, sx11, sy11, sd11, r11, g11, b11, sx01, sy01, sd01, r01, g01, b01)
+    draw_triangle(sx10, sy10, sd10, r10, g10, b10, sx01, sy01, sd01, r01, g01, b01, sx00, sy00, sd00, r00, g00, b00)
+  }
+  return 1.0
+}

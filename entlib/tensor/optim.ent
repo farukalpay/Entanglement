@@ -1,0 +1,9 @@
+module tensor.optim
+
+fn sgd_update(value: f64, gradient: f64, learning_rate: f64) -> f64 {
+  return value - learning_rate * gradient
+}
+
+fn exponential_decay(initial_rate: f64, step: f64, decay: f64) -> f64 {
+  return initial_rate * pow(decay, step)
+}

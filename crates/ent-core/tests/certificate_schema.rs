@@ -5,7 +5,7 @@ use ent_core::{
 use ent_proof::{ProofCertificate, ProofScript, Proposition, PropositionKind};
 
 #[test]
-fn certificate_v4_roundtrips_with_native_and_machine_contract_fields() {
+fn certificate_v6_roundtrips_with_machine_graphics_and_tensor_contract_fields() {
     let cert = minimal_certificate();
     assert_eq!(cert.version, CERTIFICATE_SCHEMA_VERSION);
 
@@ -19,6 +19,15 @@ fn certificate_v4_roundtrips_with_native_and_machine_contract_fields() {
     assert!(json.get("external_capabilities").is_some());
     assert!(json.get("machines").is_some());
     assert!(json.get("proof_artifacts").is_some());
+    assert!(json.get("graphics").is_some());
+    assert!(json.get("render_targets").is_some());
+    assert!(json.get("render_pipelines").is_some());
+    assert!(json.get("benchmarks").is_some());
+    assert!(json.get("tensors").is_some());
+    assert!(json.get("accelerators").is_some());
+    assert!(json.get("datasets").is_some());
+    assert!(json.get("models").is_some());
+    assert!(json.get("trainings").is_some());
     assert!(json.get("proofs").is_some());
     assert!(json.get("proof_obligations").is_none());
     assert_eq!(json["program_states"][0]["name"], "truth");
@@ -65,6 +74,15 @@ fn minimal_certificate() -> Certificate {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        graphics: vec![],
+        render_targets: vec![],
+        render_pipelines: vec![],
+        benchmarks: vec![],
+        tensors: vec![],
+        accelerators: vec![],
+        datasets: vec![],
+        models: vec![],
+        trainings: vec![],
         machines: vec![],
         memory: vec![],
         instructions: vec![],

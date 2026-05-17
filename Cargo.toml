@@ -7,6 +7,9 @@ members = [
     "crates/ent-elab",
     "crates/ent-opt",
     "crates/ent-transform",
+    "crates/ent-tensor",
+    "crates/ent-graphics",
+    "crates/ent-native-gfx",
     "crates/ent-cli",
 ]
 resolver = "2"
@@ -33,3 +36,4 @@ tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
 tree-sitter-rust = "0.23"
 pulldown-cmark = "0.12"
+png = "0.17"

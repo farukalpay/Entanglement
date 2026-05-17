@@ -1,0 +1,56 @@
+module graphics.terrain
+import graphics.math
+
+fn mountain_height(x: f64, z: f64, seed: f64) -> f64 {
+  let distance: f64 = sqrt(x * x + z * z)
+  let broad: f64 = fbm(x * 0.042 + 10.3, z * 0.042 - 4.7, seed, 5.0)
+  let medium: f64 = fbm(x * 0.105 - 2.1, z * 0.105 + 8.4, seed + 31.0, 5.0)
+  let ridge: f64 = ridged(x * 0.076 + 4.0, z * 0.076 - 6.0, seed + 53.0, 5.0)
+  let sediment: f64 = fbm(x * 0.23 + 18.0, z * 0.23 - 12.0, seed + 71.0, 4.0)
+  let gravel: f64 = fbm(x * 0.52 - 7.0, z * 0.52 + 3.0, seed + 89.0, 3.0)
+  let summit: f64 = 1.0 - smoothstep(4.0, 25.0, distance)
+  let shoulder: f64 = 1.0 - smoothstep(18.0, 42.0, distance)
+  let radial_falloff: f64 = 1.0 - smoothstep(34.0, 48.0, distance)
+  let cone: f64 = pow(max(1.0 - distance / 43.0, 0.0), 1.55) * 10.5
+  let hills: f64 = (broad * 0.58 + medium * 0.42 - 0.30) * 3.6 * shoulder
+  let peaks: f64 = ridge * ridge * 8.5 * summit
+  let channels: f64 = (sediment - broad) * smoothstep(0.45, 0.88, ridge) * shoulder * 1.4
+  let breakup: f64 = (gravel - 0.5) * 0.42 + (sediment - 0.5) * 0.28
+  return max((cone + hills + peaks + channels + breakup) * radial_falloff, -0.05)
+}
+
+fn shade_r(x: f64, z: f64, h: f64, seed: f64) -> f64 {
+  let n: f64 = fbm(x * 0.18, z * 0.18, seed + 113.0, 4.0)
+  let rock: f64 = smoothstep(5.0, 13.0, h)
+  let snow: f64 = smoothstep(13.5, 18.0, h + n * 2.0)
+  let grass: f64 = 1.0 - rock
+  return clamp(0.18 * grass + 0.43 * rock + 0.84 * snow + n * 0.05, 0.0, 1.0)
+}
+
+fn shade_g(x: f64, z: f64, h: f64, seed: f64) -> f64 {
+  let n: f64 = fbm(x * 0.20 + 3.0, z * 0.20 - 5.0, seed + 127.0, 4.0)
+  let rock: f64 = smoothstep(5.0, 13.0, h)
+  let snow: f64 = smoothstep(13.5, 18.0, h + n * 2.0)
+  let grass: f64 = 1.0 - rock
+  return clamp(0.32 * grass + 0.40 * rock + 0.86 * snow + n * 0.06, 0.0, 1.0)
+}
+
+fn shade_b(x: f64, z: f64, h: f64, seed: f64) -> f64 {
+  let n: f64 = fbm(x * 0.22 - 4.0, z * 0.22 + 6.0, seed + 139.0, 4.0)
+  let rock: f64 = smoothstep(5.0, 13.0, h)
+  let snow: f64 = smoothstep(13.5, 18.0, h + n * 2.0)
+  let grass: f64 = 1.0 - rock
+  return clamp(0.18 * grass + 0.34 * rock + 0.90 * snow + n * 0.05, 0.0, 1.0)
+}
+
+fn screen_x(x: f64, z: f64, width_value: f64) -> f64 {
+  return width_value * 0.5 + x * 10.0 + z * 1.2
+}
+
+fn screen_y(x: f64, y: f64, z: f64, height_value: f64) -> f64 {
+  return height_value * 0.78 - y * 18.0 + z * 3.0
+}
+
+fn screen_depth(x: f64, y: f64, z: f64) -> f64 {
+  return clamp(0.54 + z * 0.006 - y * 0.008, 0.02, 0.98)
+}

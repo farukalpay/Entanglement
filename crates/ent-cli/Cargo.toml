@@ -13,8 +13,11 @@ anyhow.workspace = true
 clap.workspace = true
 ent-core = { path = "../ent-core" }
 ent-elab = { path = "../ent-elab" }
+ent-graphics = { path = "../ent-graphics" }
 ent-kernel = { path = "../ent-kernel" }
+ent-native-gfx = { path = "../ent-native-gfx" }
 ent-opt = { path = "../ent-opt" }
+ent-tensor = { path = "../ent-tensor" }
 ent-transform = { path = "../ent-transform" }
 serde.workspace = true
 serde_json.workspace = true

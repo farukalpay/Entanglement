@@ -1,0 +1,109 @@
+{
+  "files": [
+    {
+      "source": "benchmarks/graphics/mountain.ent",
+      "modes": [
+        {
+          "mode": "interpret",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 2344.5237915,
+          "min_ms": 2344.011,
+          "max_ms": 2345.036583,
+          "triangles_rasterized": 1072,
+          "pixels_touched": 57635
+        },
+        {
+          "mode": "ir",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 2318.3364165000003,
+          "min_ms": 2312.688166,
+          "max_ms": 2323.984667,
+          "triangles_rasterized": 1072,
+          "pixels_touched": 57635
+        },
+        {
+          "mode": "native",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 2344.8111040000003,
+          "min_ms": 2344.7715000000003,
+          "max_ms": 2344.850708,
+          "triangles_rasterized": 1072,
+          "pixels_touched": 57635
+        }
+      ]
+    },
+    {
+      "source": "benchmarks/graphics/terrain_mesh.ent",
+      "modes": [
+        {
+          "mode": "interpret",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 1100.909354,
+          "min_ms": 1094.676625,
+          "max_ms": 1107.142083,
+          "triangles_rasterized": 0,
+          "pixels_touched": 0
+        },
+        {
+          "mode": "ir",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 1102.6955,
+          "min_ms": 1097.642,
+          "max_ms": 1107.749,
+          "triangles_rasterized": 0,
+          "pixels_touched": 0
+        },
+        {
+          "mode": "native",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 1096.991979,
+          "min_ms": 1096.6685830000001,
+          "max_ms": 1097.315375,
+          "triangles_rasterized": 0,
+          "pixels_touched": 0
+        }
+      ]
+    },
+    {
+      "source": "benchmarks/graphics/triangle_raster.ent",
+      "modes": [
+        {
+          "mode": "interpret",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 22.2907915,
+          "min_ms": 22.235958,
+          "max_ms": 22.345625000000002,
+          "triangles_rasterized": 420,
+          "pixels_touched": 54216
+        },
+        {
+          "mode": "ir",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 22.142666,
+          "min_ms": 21.866166,
+          "max_ms": 22.419166,
+          "triangles_rasterized": 420,
+          "pixels_touched": 54216
+        },
+        {
+          "mode": "native",
+          "warmup": 1,
+          "iterations": 2,
+          "mean_ms": 22.021979,
+          "min_ms": 21.960583,
+          "max_ms": 22.083375,
+          "triangles_rasterized": 420,
+          "pixels_touched": 54216
+        }
+      ]
+    }
+  ]
+}

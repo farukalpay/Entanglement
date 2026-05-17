@@ -1,0 +1,12 @@
+module tensor.metrics
+
+fn loss_delta(first: f64, final: f64) -> f64 {
+  return first - final
+}
+
+fn loss_ratio(first: f64, final: f64) -> f64 {
+  if first == 0.0 {
+    return 0.0
+  }
+  return final / first
+}

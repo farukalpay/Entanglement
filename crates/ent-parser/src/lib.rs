@@ -19,6 +19,9 @@ pub struct ParseDiagnostic {
 pub struct WorldAst {
     pub name: String,
     pub span: SourceSpan,
+    pub modules: Vec<ModuleDecl>,
+    pub imports: Vec<ImportDecl>,
+    pub functions: Vec<FunctionDecl>,
     pub dimensions: Vec<DimensionDecl>,
     pub states: Vec<StateDecl>,
     pub relations: Vec<RelationDecl>,
@@ -32,6 +35,15 @@ pub struct WorldAst {
     pub selections: Vec<SelectionDecl>,
     pub transforms: Vec<TransformDecl>,
     pub validators: Vec<ValidatorDecl>,
+    pub graphics: Vec<GraphicsDecl>,
+    pub render_targets: Vec<RenderTargetDecl>,
+    pub render_pipelines: Vec<RenderPipelineDecl>,
+    pub benchmarks: Vec<BenchmarkDecl>,
+    pub tensors: Vec<TensorDecl>,
+    pub accelerators: Vec<AcceleratorDecl>,
+    pub datasets: Vec<DatasetDecl>,
+    pub models: Vec<ModelDecl>,
+    pub trainings: Vec<TrainingDecl>,
     pub machines: Vec<MachineDecl>,
     pub memories: Vec<MemoryDecl>,
     pub instructions: Vec<InstructionDecl>,
@@ -42,6 +54,26 @@ pub struct WorldAst {
     pub measures: Vec<MeasureDecl>,
     pub theorems: Vec<TheoremDecl>,
     pub proofs: Vec<ProofDecl>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModuleDecl {
+    pub name: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportDecl {
+    pub path: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionDecl {
+    pub name: String,
+    pub signature: String,
+    pub body: String,
+    pub span: SourceSpan,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,6 +244,108 @@ pub struct ValidatorDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphicsDecl {
+    pub name: String,
+    pub entry: String,
+    pub imports: Vec<String>,
+    pub body: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderTargetDecl {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub format: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderPipelineDecl {
+    pub name: String,
+    pub graphics: String,
+    pub target: String,
+    pub entry: String,
+    pub mode: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BenchmarkDecl {
+    pub name: String,
+    pub graphics: String,
+    pub entry: String,
+    pub warmup: u32,
+    pub iterations: u32,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TensorDecl {
+    pub name: String,
+    pub shape: Vec<String>,
+    pub dtype: String,
+    pub gradient: String,
+    pub layout: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceleratorDecl {
+    pub name: String,
+    pub kind: String,
+    pub memory: String,
+    pub precision: String,
+    pub supports: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatasetDecl {
+    pub name: String,
+    pub tensors: Vec<String>,
+    pub source: String,
+    pub source_digest: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelDecl {
+    pub name: String,
+    pub entry: String,
+    pub inputs: Vec<String>,
+    pub parameters: Vec<String>,
+    pub outputs: Vec<String>,
+    pub ops: Vec<String>,
+    pub loss: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrainingDecl {
+    pub name: String,
+    pub model: String,
+    pub dataset: String,
+    pub accelerator: String,
+    pub optimizer: String,
+    pub learning_rate: f64,
+    pub steps: u32,
+    pub batch: u32,
+    pub objective: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineDecl {
     pub id: String,
     pub isa: String,
@@ -327,7 +461,7 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
                 stripped.len(),
             )
         })?;
-    let close = stripped.rfind('}').ok_or_else(|| {
+    let close = matching_brace(&stripped, brace).ok_or_else(|| {
         ParseDiagnostic::new(
             "malformed-declaration",
             ParseError::Malformed("world body is not closed".to_owned()),
@@ -340,6 +474,7 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         ParseDiagnostic::new("malformed-declaration", error, header_start, brace)
     })?;
     let body = &stripped[brace + 1..close];
+    let surface = parse_surface_decls(&stripped[..header_start])?;
 
     let mut ast = WorldAst {
         name,
@@ -347,6 +482,9 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
             start: header_start,
             end: close + 1,
         },
+        modules: surface.modules,
+        imports: surface.imports,
+        functions: surface.functions,
         dimensions,
         states: vec![],
         relations: vec![],
@@ -360,6 +498,15 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        graphics: vec![],
+        render_targets: vec![],
+        render_pipelines: vec![],
+        benchmarks: vec![],
+        tensors: vec![],
+        accelerators: vec![],
+        datasets: vec![],
+        models: vec![],
+        trainings: vec![],
         machines: vec![],
         memories: vec![],
         instructions: vec![],
@@ -423,6 +570,38 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         } else if let Some(rest) = line.strip_prefix("validator ") {
             ast.validators
                 .push(parse_validator(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("graphics ") {
+            let (graphics, consumed) = parse_graphics_block(rest, span, &mut lines)
+                .map_err(|error| diagnostic(error, span, line))?;
+            body_offset += consumed;
+            ast.graphics.push(graphics);
+        } else if let Some(rest) = line.strip_prefix("render-target ") {
+            ast.render_targets.push(
+                parse_render_target(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("render-pipeline ") {
+            ast.render_pipelines.push(
+                parse_render_pipeline(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("benchmark ") {
+            ast.benchmarks
+                .push(parse_benchmark(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("tensor ") {
+            ast.tensors
+                .push(parse_tensor(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("accelerator ") {
+            ast.accelerators.push(
+                parse_accelerator(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("dataset ") {
+            ast.datasets
+                .push(parse_dataset(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("model ") {
+            ast.models
+                .push(parse_model(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("training ") {
+            ast.trainings
+                .push(parse_training(rest, span).map_err(|error| diagnostic(error, span, line))?);
         } else if let Some(rest) = line.strip_prefix("machine ") {
             ast.machines
                 .push(parse_machine(rest, span).map_err(|error| diagnostic(error, span, line))?);
@@ -511,6 +690,102 @@ fn diagnostic(error: ParseError, span: SourceSpan, line: &str) -> ParseDiagnosti
     let mut diagnostic = ParseDiagnostic::new(kind, error, span.start, span.end);
     diagnostic.message = format!("{} at `{line}`", diagnostic.message);
     diagnostic
+}
+
+#[derive(Default)]
+struct SurfaceDecls {
+    modules: Vec<ModuleDecl>,
+    imports: Vec<ImportDecl>,
+    functions: Vec<FunctionDecl>,
+}
+
+fn parse_surface_decls(source: &str) -> Result<SurfaceDecls, ParseDiagnostic> {
+    let mut decls = SurfaceDecls::default();
+    let mut offset = 0usize;
+    let mut lines = source.split_inclusive('\n').peekable();
+    while let Some(raw) = lines.next() {
+        let line = raw.trim();
+        if line.is_empty() {
+            offset += raw.len();
+            continue;
+        }
+        let local_start = raw.find(line).expect("trimmed line exists");
+        let span = SourceSpan {
+            start: offset + local_start,
+            end: offset + local_start + line.len(),
+        };
+        if let Some(rest) = line.strip_prefix("module ") {
+            let name = rest.trim();
+            if name.is_empty() || name.split_whitespace().count() != 1 {
+                return Err(diagnostic(
+                    ParseError::Malformed(line.to_owned()),
+                    span,
+                    line,
+                ));
+            }
+            decls.modules.push(ModuleDecl {
+                name: name.to_owned(),
+                span,
+            });
+        } else if let Some(rest) = line.strip_prefix("import ") {
+            let path = rest.trim();
+            if path.is_empty() || path.split_whitespace().count() != 1 {
+                return Err(diagnostic(
+                    ParseError::Malformed(line.to_owned()),
+                    span,
+                    line,
+                ));
+            }
+            decls.imports.push(ImportDecl {
+                path: path.to_owned(),
+                span,
+            });
+        } else if let Some(rest) = line.strip_prefix("fn ") {
+            let (function, consumed) = parse_surface_function(rest, span, &mut lines)
+                .map_err(|error| diagnostic(error, span, line))?;
+            offset += consumed;
+            decls.functions.push(function);
+        } else {
+            return Err(ParseDiagnostic::new(
+                "unsupported-item",
+                ParseError::Unsupported(line.to_owned()),
+                span.start,
+                span.end,
+            ));
+        }
+        offset += raw.len();
+    }
+    Ok(decls)
+}
+
+fn matching_brace(source: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in source.char_indices().skip_while(|(idx, _)| *idx < open) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn strip_comments_preserve_width(source: &str) -> String {
@@ -989,6 +1264,493 @@ fn parse_validator(rest: &str, span: SourceSpan) -> Result<ValidatorDecl, ParseE
     })
 }
 
+fn parse_surface_function<'a, I>(
+    rest: &str,
+    span: SourceSpan,
+    lines: &mut std::iter::Peekable<I>,
+) -> Result<(FunctionDecl, usize), ParseError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let header = rest.trim();
+    let open = header
+        .find('(')
+        .ok_or_else(|| ParseError::Malformed(header.to_owned()))?;
+    let name = header[..open].trim();
+    if name.is_empty() || name.split_whitespace().count() != 1 || !header.contains('{') {
+        return Err(ParseError::Malformed(header.to_owned()));
+    }
+    let mut body = String::new();
+    let mut consumed = 0usize;
+    let mut depth = brace_delta(header);
+    while depth > 0 {
+        let Some(raw) = lines.next() else {
+            return Err(ParseError::Malformed(
+                "function block is not closed".to_owned(),
+            ));
+        };
+        consumed += raw.len();
+        depth += brace_delta(raw);
+        if depth > 0 || raw.trim() != "}" {
+            body.push_str(raw);
+        }
+    }
+    Ok((
+        FunctionDecl {
+            name: name.to_owned(),
+            signature: header.trim_end_matches('{').trim().to_owned(),
+            body,
+            span,
+        },
+        consumed,
+    ))
+}
+
+fn parse_graphics_block<'a, I>(
+    rest: &str,
+    span: SourceSpan,
+    lines: &mut std::iter::Peekable<I>,
+) -> Result<(GraphicsDecl, usize), ParseError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let header = rest.trim();
+    let header = header
+        .strip_suffix('{')
+        .ok_or_else(|| ParseError::Malformed("graphics block must open with `{`".to_owned()))?
+        .trim();
+    let (head, evidence) = header
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut entry = "main".to_owned();
+    if let Some(word) = words.next() {
+        if word != "entry" {
+            return Err(ParseError::Malformed(rest.to_owned()));
+        }
+        entry = words
+            .next()
+            .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+            .to_owned();
+    }
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+
+    let mut body = String::new();
+    let mut consumed = 0usize;
+    let mut depth = 1isize;
+    let mut closed = false;
+    for raw in lines.by_ref() {
+        consumed += raw.len();
+        depth += brace_delta(raw);
+        if depth == 0 {
+            closed = true;
+            let without_close = raw.trim_end();
+            if without_close != "}" {
+                body.push_str(raw.trim_end_matches('}'));
+            }
+            break;
+        }
+        body.push_str(raw);
+    }
+    if !closed {
+        return Err(ParseError::Malformed(
+            "graphics block is not closed".to_owned(),
+        ));
+    }
+    let imports = body
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_prefix("import "))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok((
+        GraphicsDecl {
+            name: name.to_owned(),
+            entry,
+            imports,
+            body,
+            evidence: evidence.trim().to_owned(),
+            span,
+        },
+        consumed,
+    ))
+}
+
+fn brace_delta(input: &str) -> isize {
+    let mut opens = 0usize;
+    let mut closes = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in input.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => opens += 1,
+            '}' => closes += 1,
+            _ => {}
+        }
+    }
+    opens as isize - closes as isize
+}
+
+fn parse_render_target(rest: &str, span: SourceSpan) -> Result<RenderTargetDecl, ParseError> {
+    let mut words = rest.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "width", rest)?;
+    let width = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "height", rest)?;
+    let height = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "format", rest)?;
+    let format = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "evidence", rest)?;
+    let evidence = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RenderTargetDecl {
+        name: name.to_owned(),
+        width,
+        height,
+        format: format.to_owned(),
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_render_pipeline(rest: &str, span: SourceSpan) -> Result<RenderPipelineDecl, ParseError> {
+    let mut words = rest.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "graphics", rest)?;
+    let graphics = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "target", rest)?;
+    let target = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "entry", rest)?;
+    let entry = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut mode = "native".to_owned();
+    let next = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if next == "mode" {
+        mode = words
+            .next()
+            .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+            .to_owned();
+        expect_word(words.next(), "evidence", rest)?;
+    } else if next != "evidence" {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    let evidence = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RenderPipelineDecl {
+        name: name.to_owned(),
+        graphics: graphics.to_owned(),
+        target: target.to_owned(),
+        entry: entry.to_owned(),
+        mode,
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_benchmark(rest: &str, span: SourceSpan) -> Result<BenchmarkDecl, ParseError> {
+    let mut words = rest.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "graphics", rest)?;
+    let graphics = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "entry", rest)?;
+    let entry = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "warmup", rest)?;
+    let warmup = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "iterations", rest)?;
+    let iterations = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "evidence", rest)?;
+    let evidence = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(BenchmarkDecl {
+        name: name.to_owned(),
+        graphics: graphics.to_owned(),
+        entry: entry.to_owned(),
+        warmup,
+        iterations,
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_tensor(rest: &str, span: SourceSpan) -> Result<TensorDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, layout) = head
+        .rsplit_once(" layout ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, gradient) = head
+        .rsplit_once(" gradient ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, dtype) = head
+        .rsplit_once(" dtype ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (name, shape) = head
+        .split_once(" shape ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let name = name.trim();
+    let evidence = evidence.trim();
+    if name.is_empty()
+        || dtype.trim().is_empty()
+        || gradient.trim().is_empty()
+        || layout.trim().is_empty()
+        || evidence.is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(TensorDecl {
+        name: name.to_owned(),
+        shape: parse_name_list(shape.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        dtype: dtype.trim().to_owned(),
+        gradient: gradient.trim().to_owned(),
+        layout: layout.trim().to_owned(),
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_accelerator(rest: &str, span: SourceSpan) -> Result<AcceleratorDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, supports) = head
+        .rsplit_once(" supports ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "kind", rest)?;
+    let kind = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "memory", rest)?;
+    let memory = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "precision", rest)?;
+    let precision = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(AcceleratorDecl {
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        memory: memory.to_owned(),
+        precision: precision.to_owned(),
+        supports: parse_name_list(supports.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_dataset(rest: &str, span: SourceSpan) -> Result<DatasetDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, source_digest) = split_quoted_tail(head, " digest ")?;
+    let (head, source) = split_quoted_tail(head, " source ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "tensors", rest)?;
+    let tensors = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(DatasetDecl {
+        name: name.to_owned(),
+        tensors: parse_name_list(tensors).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        source,
+        source_digest,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_model(rest: &str, span: SourceSpan) -> Result<ModelDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, loss) = head
+        .rsplit_once(" loss ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, ops) = head
+        .rsplit_once(" ops ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "entry", rest)?;
+    let entry = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "inputs", rest)?;
+    let inputs = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "parameters", rest)?;
+    let parameters = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "outputs", rest)?;
+    let outputs = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() || loss.trim().is_empty() || evidence.trim().is_empty() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(ModelDecl {
+        name: name.to_owned(),
+        entry: entry.to_owned(),
+        inputs: parse_name_list(inputs).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        parameters: parse_name_list(parameters)
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        outputs: parse_name_list(outputs).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        ops: parse_argv(ops.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        loss: loss.trim().to_owned(),
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_training(rest: &str, span: SourceSpan) -> Result<TrainingDecl, ParseError> {
+    let mut words = rest.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "model", rest)?;
+    let model = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "dataset", rest)?;
+    let dataset = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "accelerator", rest)?;
+    let accelerator = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "optimizer", rest)?;
+    let optimizer = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "learning-rate", rest)?;
+    let learning_rate = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<f64>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "steps", rest)?;
+    let steps = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "batch", rest)?;
+    let batch = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "objective", rest)?;
+    let objective = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "evidence", rest)?;
+    let evidence = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some() {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(TrainingDecl {
+        name: name.to_owned(),
+        model: model.to_owned(),
+        dataset: dataset.to_owned(),
+        accelerator: accelerator.to_owned(),
+        optimizer: optimizer.to_owned(),
+        learning_rate,
+        steps,
+        batch,
+        objective: objective.to_owned(),
+        evidence: evidence.to_owned(),
+        span,
+    })
+}
+
 fn parse_machine(rest: &str, span: SourceSpan) -> Result<MachineDecl, ParseError> {
     let (head, evidence) = rest
         .rsplit_once(" evidence ")
@@ -1396,12 +2158,48 @@ fn parse_argv(input: &str) -> Result<Vec<String>, ()> {
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
         .ok_or(())?;
-    if body.trim().is_empty() {
-        return Ok(vec![]);
+    parse_quoted_list_body(body)
+}
+
+fn parse_quoted_list_body(body: &str) -> Result<Vec<String>, ()> {
+    let mut values = Vec::new();
+    let mut token = String::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in body.chars() {
+        if escaped {
+            token.push('\\');
+            token.push(ch);
+            escaped = false;
+            continue;
+        }
+        if in_string && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            token.push(ch);
+            continue;
+        }
+        if ch == ',' && !in_string {
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                values.push(parse_quoted(trimmed)?);
+            }
+            token.clear();
+            continue;
+        }
+        token.push(ch);
     }
-    body.split(',')
-        .map(|part| parse_quoted(part.trim()))
-        .collect::<Result<Vec<_>, _>>()
+    if in_string || escaped {
+        return Err(());
+    }
+    let trimmed = token.trim();
+    if !trimmed.is_empty() {
+        values.push(parse_quoted(trimmed)?);
+    }
+    Ok(values)
 }
 
 fn parse_name_list(input: &str) -> Result<Vec<String>, ()> {

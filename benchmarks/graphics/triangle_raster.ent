@@ -1,0 +1,56 @@
+world TriangleRasterBench(agent Viewer, space Screen) {
+  state pixels : Resource
+
+  graphics triangle_raster entry main evidence triangle_raster_graphics_contract {
+    fn main() -> f64 {
+      let w: f64 = width()
+      let h: f64 = height()
+      begin_frame(w, h)
+      clear(0.02, 0.025, 0.035)
+      let count: f64 = 420.0
+      for i in range(0, count) {
+        let t: f64 = i / count
+        let cx: f64 = fract(sin(i * 12.9898) * 43758.5453) * w
+        let cy: f64 = fract(sin(i * 78.233) * 24634.6345) * h
+        let radius: f64 = 4.0 + fract(sin(i * 19.19) * 9137.17) * 18.0
+        let depth: f64 = 0.05 + t * 0.90
+        let r: f64 = 0.2 + fract(sin(i * 3.1) * 17.0) * 0.7
+        let g: f64 = 0.2 + fract(sin(i * 5.7) * 23.0) * 0.7
+        let b: f64 = 0.2 + fract(sin(i * 9.3) * 31.0) * 0.7
+        draw_triangle(cx, cy - radius, depth, r, g, b, cx - radius, cy + radius, depth, r * 0.7, g, b, cx + radius, cy + radius, depth, r, g * 0.7, b)
+      }
+      flush()
+      return count
+    }
+  }
+
+  render-target triangle_frame width 640 height 360 format rgba8 evidence triangle_target_contract
+  render-pipeline triangle_pipeline graphics triangle_raster target triangle_frame entry main mode ir evidence triangle_pipeline_contract
+  benchmark triangle_benchmark graphics triangle_raster entry main warmup 5 iterations 30 evidence triangle_benchmark_contract
+
+  theorem triangle_graphics : graphics_admissible(triangle_raster)
+  theorem triangle_target : render_target_admissible(triangle_frame)
+  theorem triangle_pipeline : render_pipeline_admissible(triangle_pipeline)
+  theorem triangle_bench : benchmark_admissible(triangle_benchmark)
+
+  proof triangle_graphics {
+    let row = row graphics triangle_raster
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof triangle_target {
+    let row = row render-target triangle_frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof triangle_pipeline {
+    let row = row render-pipeline triangle_pipeline
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof triangle_bench {
+    let row = row benchmark triangle_benchmark
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}

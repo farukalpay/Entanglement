@@ -77,6 +77,36 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
     after
         .validators
         .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .graphics
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for graphics in &mut after.graphics {
+        graphics.imports.sort();
+    }
+    after
+        .render_targets
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .render_pipelines
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .benchmarks
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .tensors
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .accelerators
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .datasets
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .models
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .trainings
+        .sort_by(|left, right| left.name.cmp(&right.name));
     after.machines.sort_by(|left, right| left.id.cmp(&right.id));
     after
         .memory
@@ -109,7 +139,7 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
 
     let verification = verify(&after)?;
     Ok(RewriteProof {
-        name: "canonicalize-certificate-v4".to_owned(),
+        name: "canonicalize-certificate-v6".to_owned(),
         before: cert.clone(),
         after,
         verification,

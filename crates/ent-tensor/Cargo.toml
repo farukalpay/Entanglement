@@ -1,0 +1,14 @@
+[package]
+name = "ent-tensor"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ent-core = { path = "../ent-core" }
+ent-elab = { path = "../ent-elab" }
+ent-kernel = { path = "../ent-kernel" }
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true

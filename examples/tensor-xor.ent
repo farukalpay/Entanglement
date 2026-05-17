@@ -1,0 +1,97 @@
+import tensor.nn
+import tensor.optim
+
+fn xor_workload_flops(batch: f64) -> f64 {
+  return dense_classifier_flops(batch, 2.0, 2.0, 2.0)
+}
+
+world TensorXor(agent Trainer, space Batch) {
+  state values : Resource
+
+  tensor features shape [4,2] dtype f32 gradient none layout row-major evidence features_tensor_shape
+  tensor labels shape [4,2] dtype f32 gradient none layout row-major evidence labels_tensor_shape
+  tensor w1 shape [2,2] dtype f32 gradient tracked layout row-major evidence w1_tensor_shape
+  tensor b1 shape [1,2] dtype f32 gradient tracked layout row-major evidence b1_tensor_shape
+  tensor w2 shape [2,2] dtype f32 gradient tracked layout row-major evidence w2_tensor_shape
+  tensor b2 shape [1,2] dtype f32 gradient tracked layout row-major evidence b2_tensor_shape
+  tensor logits shape [4,2] dtype f32 gradient none layout row-major evidence logits_tensor_shape
+  tensor loss shape [1] dtype f32 gradient none layout scalar evidence loss_tensor_shape
+  accelerator cpu kind cpu memory host precision f32 supports [linear,matmul,add,relu,softmax_cross_entropy] evidence local_cpu_tensor_executor
+  dataset xor tensors [features,labels,w1,b1,w2,b2] source "inline:features=0,0;0,1;1,0;1,1|labels=1,0;0,1;0,1;1,0|w1=0.2,-0.1;0.1,0.3|b1=0,0|w2=0.2,-0.2;0.1,0.1|b2=0,0" digest "sha256:d914ae26806a05338753d08955a79695b476d80cab72ba7335442ab4e56f52a4" evidence xor_inline_dataset_digest
+  model xor_mlp entry forward inputs [features,labels] parameters [w1,b1,w2,b2] outputs [logits,loss] ops ["linear(features,w1,b1)->hidden","relu(hidden)->activated","linear(activated,w2,b2)->logits","softmax_cross_entropy(logits,labels)->loss"] loss loss evidence xor_mlp_op_graph
+  training xor_train model xor_mlp dataset xor accelerator cpu optimizer sgd learning-rate 0.2 steps 20 batch 4 objective minimize_loss evidence xor_training_contract
+
+  theorem features_ok : tensor_admissible(features)
+  theorem labels_ok : tensor_admissible(labels)
+  theorem w1_ok : tensor_admissible(w1)
+  theorem b1_ok : tensor_admissible(b1)
+  theorem w2_ok : tensor_admissible(w2)
+  theorem b2_ok : tensor_admissible(b2)
+  theorem logits_ok : tensor_admissible(logits)
+  theorem loss_ok : tensor_admissible(loss)
+  theorem cpu_ok : accelerator_admissible(cpu)
+  theorem xor_data_ok : dataset_admissible(xor)
+  theorem xor_model_ok : model_admissible(xor_mlp)
+  theorem xor_training_ok : training_admissible(xor_train)
+
+  proof features_ok {
+    let row = row tensor features
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof labels_ok {
+    let row = row tensor labels
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof w1_ok {
+    let row = row tensor w1
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof b1_ok {
+    let row = row tensor b1
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof w2_ok {
+    let row = row tensor w2
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof b2_ok {
+    let row = row tensor b2
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof logits_ok {
+    let row = row tensor logits
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof loss_ok {
+    let row = row tensor loss
+    let fact = rule tensor_admissible_from_tensor(row)
+    qed fact
+  }
+  proof cpu_ok {
+    let row = row accelerator cpu
+    let fact = rule accelerator_admissible_from_accelerator(row)
+    qed fact
+  }
+  proof xor_data_ok {
+    let row = row dataset xor
+    let fact = rule dataset_admissible_from_dataset(row)
+    qed fact
+  }
+  proof xor_model_ok {
+    let row = row model xor_mlp
+    let fact = rule model_admissible_from_model(row)
+    qed fact
+  }
+  proof xor_training_ok {
+    let row = row training xor_train
+    let fact = rule training_admissible_from_training(row)
+    qed fact
+  }
+}

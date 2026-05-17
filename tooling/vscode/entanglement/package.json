@@ -1,0 +1,35 @@
+{
+  "name": "entanglement-language",
+  "displayName": "Entanglement",
+  "description": "Language support for Entanglement .ent files.",
+  "version": "0.1.0",
+  "publisher": "entanglement",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "entanglement",
+        "aliases": [
+          "Entanglement",
+          "ent"
+        ],
+        "extensions": [
+          ".ent"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "entanglement",
+        "scopeName": "source.ent",
+        "path": "./syntaxes/ent.tmLanguage.json"
+      }
+    ]
+  }
+}

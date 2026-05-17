@@ -1,0 +1,79 @@
+world BenchmarkFigure(agent Reader, space Canvas) {
+  state pixels : Resource
+
+  graphics benchmark_figure entry main evidence benchmark_figure_graphics_contract {
+    import graphics.chart
+
+    fn draw_group(x: f64, baseline: f64, scale: f64, a: f64, b: f64, c: f64) -> f64 {
+      draw_bar(x, baseline, 24.0, a, scale, 0.28, 0.54, 0.88)
+      draw_bar(x + 30.0, baseline, 24.0, b, scale, 0.40, 0.78, 0.48)
+      draw_bar(x + 60.0, baseline, 24.0, c, scale, 0.92, 0.66, 0.30)
+      return 1.0
+    }
+
+    fn main() -> f64 {
+      let w: f64 = width()
+      let h: f64 = height()
+      let baseline: f64 = h - 82.0
+      let scale: f64 = 0.16
+      begin_frame(w, h)
+      clear(0.018, 0.022, 0.030)
+      draw_rect(58.0, 44.0, w - 116.0, h - 116.0, 0.91, 0.035, 0.044, 0.058)
+      draw_text(86.0, 58.0, 4.0, 0.84, 0.90, 0.96, "ENT BENCHMARK MEAN MS")
+      draw_gridline(baseline, 86.0, w - 86.0)
+      draw_gridline(baseline - 160.0, 86.0, w - 86.0)
+      draw_gridline(baseline - 320.0, 86.0, w - 86.0)
+      draw_text(90.0, baseline - 10.0, 3.0, 0.62, 0.68, 0.74, "0")
+      draw_text(90.0, baseline - 170.0, 3.0, 0.62, 0.68, 0.74, "1000")
+      draw_text(90.0, baseline - 330.0, 3.0, 0.62, 0.68, 0.74, "2000")
+      draw_group(160.0, baseline, scale, 2344.52, 2318.34, 2344.81)
+      draw_group(500.0, baseline, scale, 1100.91, 1102.70, 1096.99)
+      draw_group(840.0, baseline, scale, 22.29, 22.14, 22.02)
+      draw_rect(86.0, 112.0, 24.0, 18.0, 0.35, 0.28, 0.54, 0.88)
+      draw_rect(278.0, 112.0, 24.0, 18.0, 0.35, 0.40, 0.78, 0.48)
+      draw_rect(354.0, 112.0, 24.0, 18.0, 0.35, 0.92, 0.66, 0.30)
+      draw_text(120.0, 112.0, 3.0, 0.70, 0.78, 0.88, "INTERPRET")
+      draw_text(312.0, 112.0, 3.0, 0.70, 0.78, 0.88, "IR")
+      draw_text(388.0, 112.0, 3.0, 0.70, 0.78, 0.88, "NAT")
+      draw_text(760.0, 112.0, 2.0, 0.62, 0.68, 0.74, "WORKLOAD     I    IR    N")
+      draw_text(760.0, 140.0, 2.0, 0.84, 0.90, 0.94, "MOUNTAIN  2345  2318  2345")
+      draw_text(760.0, 166.0, 2.0, 0.84, 0.90, 0.94, "TERRAIN   1101  1103  1097")
+      draw_text(760.0, 192.0, 2.0, 0.84, 0.90, 0.94, "TRIANGLES   22    22    22")
+      draw_text(145.0, baseline + 28.0, 3.0, 0.78, 0.84, 0.88, "MOUNTAIN")
+      draw_text(490.0, baseline + 28.0, 3.0, 0.78, 0.84, 0.88, "TERRAIN")
+      draw_text(825.0, baseline + 28.0, 3.0, 0.78, 0.84, 0.88, "TRIANGLES")
+      flush()
+      return 1.0
+    }
+  }
+
+  render-target benchmark_frame width 1280 height 720 format rgba8 evidence benchmark_target_contract
+  render-pipeline benchmark_pipeline graphics benchmark_figure target benchmark_frame entry main mode native evidence benchmark_pipeline_contract
+  benchmark benchmark_figure_benchmark graphics benchmark_figure entry main warmup 1 iterations 2 evidence benchmark_contract
+
+  theorem benchmark_graphics : graphics_admissible(benchmark_figure)
+  theorem benchmark_target : render_target_admissible(benchmark_frame)
+  theorem benchmark_pipeline : render_pipeline_admissible(benchmark_pipeline)
+  theorem benchmark_bench : benchmark_admissible(benchmark_figure_benchmark)
+
+  proof benchmark_graphics {
+    let row = row graphics benchmark_figure
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof benchmark_target {
+    let row = row render-target benchmark_frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof benchmark_pipeline {
+    let row = row render-pipeline benchmark_pipeline
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof benchmark_bench {
+    let row = row benchmark benchmark_figure_benchmark
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}

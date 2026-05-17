@@ -19,6 +19,15 @@ pub enum PropositionKind {
     SelectionAdmissible,
     TransformAdmissible,
     ValidatorAdmissible,
+    GraphicsAdmissible,
+    RenderTargetAdmissible,
+    RenderPipelineAdmissible,
+    BenchmarkAdmissible,
+    TensorAdmissible,
+    AcceleratorAdmissible,
+    DatasetAdmissible,
+    ModelAdmissible,
+    TrainingAdmissible,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -44,6 +53,15 @@ pub enum RowKind {
     Selection,
     Transform,
     Validator,
+    Graphics,
+    RenderTarget,
+    RenderPipeline,
+    Benchmark,
+    Tensor,
+    Accelerator,
+    Dataset,
+    Model,
+    Training,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -63,6 +81,15 @@ pub enum PrimitiveRule {
     SelectionAdmissibleFromSelection,
     TransformAdmissibleFromTransform,
     ValidatorAdmissibleFromValidator,
+    GraphicsAdmissibleFromGraphics,
+    RenderTargetAdmissibleFromRenderTarget,
+    RenderPipelineAdmissibleFromRenderPipeline,
+    BenchmarkAdmissibleFromBenchmark,
+    TensorAdmissibleFromTensor,
+    AcceleratorAdmissibleFromAccelerator,
+    DatasetAdmissibleFromDataset,
+    ModelAdmissibleFromModel,
+    TrainingAdmissibleFromTraining,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +170,15 @@ pub fn parse_proposition(input: &str) -> Result<Proposition, ProofParseError> {
         "selection_admissible" => PropositionKind::SelectionAdmissible,
         "transform_admissible" => PropositionKind::TransformAdmissible,
         "validator_admissible" => PropositionKind::ValidatorAdmissible,
+        "graphics_admissible" => PropositionKind::GraphicsAdmissible,
+        "render_target_admissible" => PropositionKind::RenderTargetAdmissible,
+        "render_pipeline_admissible" => PropositionKind::RenderPipelineAdmissible,
+        "benchmark_admissible" => PropositionKind::BenchmarkAdmissible,
+        "tensor_admissible" => PropositionKind::TensorAdmissible,
+        "accelerator_admissible" => PropositionKind::AcceleratorAdmissible,
+        "dataset_admissible" => PropositionKind::DatasetAdmissible,
+        "model_admissible" => PropositionKind::ModelAdmissible,
+        "training_admissible" => PropositionKind::TrainingAdmissible,
         _ => return Err(ProofParseError::UnknownProposition(operator.to_owned())),
     };
     Ok(Proposition {
@@ -254,6 +290,15 @@ fn parse_row_kind(input: &str) -> Result<RowKind, ProofParseError> {
         "selection" => Ok(RowKind::Selection),
         "transform" => Ok(RowKind::Transform),
         "validator" => Ok(RowKind::Validator),
+        "graphics" => Ok(RowKind::Graphics),
+        "render-target" => Ok(RowKind::RenderTarget),
+        "render-pipeline" => Ok(RowKind::RenderPipeline),
+        "benchmark" => Ok(RowKind::Benchmark),
+        "tensor" => Ok(RowKind::Tensor),
+        "accelerator" => Ok(RowKind::Accelerator),
+        "dataset" => Ok(RowKind::Dataset),
+        "model" => Ok(RowKind::Model),
+        "training" => Ok(RowKind::Training),
         _ => Err(ProofParseError::UnknownRowKind(input.to_owned())),
     }
 }
@@ -287,6 +332,23 @@ fn parse_rule(input: &str) -> Result<PrimitiveRule, ProofParseError> {
         "validator_admissible_from_validator" => {
             Ok(PrimitiveRule::ValidatorAdmissibleFromValidator)
         }
+        "graphics_admissible_from_graphics" => Ok(PrimitiveRule::GraphicsAdmissibleFromGraphics),
+        "render_target_admissible_from_render_target" => {
+            Ok(PrimitiveRule::RenderTargetAdmissibleFromRenderTarget)
+        }
+        "render_pipeline_admissible_from_render_pipeline" => {
+            Ok(PrimitiveRule::RenderPipelineAdmissibleFromRenderPipeline)
+        }
+        "benchmark_admissible_from_benchmark" => {
+            Ok(PrimitiveRule::BenchmarkAdmissibleFromBenchmark)
+        }
+        "tensor_admissible_from_tensor" => Ok(PrimitiveRule::TensorAdmissibleFromTensor),
+        "accelerator_admissible_from_accelerator" => {
+            Ok(PrimitiveRule::AcceleratorAdmissibleFromAccelerator)
+        }
+        "dataset_admissible_from_dataset" => Ok(PrimitiveRule::DatasetAdmissibleFromDataset),
+        "model_admissible_from_model" => Ok(PrimitiveRule::ModelAdmissibleFromModel),
+        "training_admissible_from_training" => Ok(PrimitiveRule::TrainingAdmissibleFromTraining),
         _ => Err(ProofParseError::UnknownRule(input.to_owned())),
     }
 }
@@ -510,6 +572,35 @@ fn rule_contract(rule: &PrimitiveRule) -> (RowKind, PropositionKind) {
         }
         PrimitiveRule::ValidatorAdmissibleFromValidator => {
             (RowKind::Validator, PropositionKind::ValidatorAdmissible)
+        }
+        PrimitiveRule::GraphicsAdmissibleFromGraphics => {
+            (RowKind::Graphics, PropositionKind::GraphicsAdmissible)
+        }
+        PrimitiveRule::RenderTargetAdmissibleFromRenderTarget => (
+            RowKind::RenderTarget,
+            PropositionKind::RenderTargetAdmissible,
+        ),
+        PrimitiveRule::RenderPipelineAdmissibleFromRenderPipeline => (
+            RowKind::RenderPipeline,
+            PropositionKind::RenderPipelineAdmissible,
+        ),
+        PrimitiveRule::BenchmarkAdmissibleFromBenchmark => {
+            (RowKind::Benchmark, PropositionKind::BenchmarkAdmissible)
+        }
+        PrimitiveRule::TensorAdmissibleFromTensor => {
+            (RowKind::Tensor, PropositionKind::TensorAdmissible)
+        }
+        PrimitiveRule::AcceleratorAdmissibleFromAccelerator => {
+            (RowKind::Accelerator, PropositionKind::AcceleratorAdmissible)
+        }
+        PrimitiveRule::DatasetAdmissibleFromDataset => {
+            (RowKind::Dataset, PropositionKind::DatasetAdmissible)
+        }
+        PrimitiveRule::ModelAdmissibleFromModel => {
+            (RowKind::Model, PropositionKind::ModelAdmissible)
+        }
+        PrimitiveRule::TrainingAdmissibleFromTraining => {
+            (RowKind::Training, PropositionKind::TrainingAdmissible)
         }
     }
 }

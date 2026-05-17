@@ -1,0 +1,57 @@
+world MountainRender(agent Viewer, space Screen) {
+  state pixels : Resource
+
+  graphics mountain_scene entry main evidence mountain_graphics_contract {
+    import graphics.raster
+
+    fn main() -> f64 {
+      let w: f64 = width()
+      let h: f64 = height()
+      let grid: f64 = 28.0
+      let extent: f64 = 68.0
+      let step: f64 = extent / grid
+      let seed: f64 = 23.0
+      begin_frame(w, h)
+      clear(0.030, 0.044, 0.062)
+      for zi in range(0, grid) {
+        for xi in range(0, grid) {
+          let world_x: f64 = -extent * 0.5 + xi * step
+          let world_z: f64 = -extent * 0.5 + zi * step
+          draw_mountain_cell(world_x, world_z, step, seed, w, h)
+        }
+      }
+      flush()
+      return 1.0
+    }
+  }
+
+  render-target mountain_frame width 1280 height 720 format rgba8 evidence mountain_target_contract
+  render-pipeline mountain_pipeline graphics mountain_scene target mountain_frame entry main mode native evidence mountain_pipeline_contract
+  benchmark mountain_benchmark graphics mountain_scene entry main warmup 5 iterations 30 evidence mountain_benchmark_contract
+
+  theorem mountain_graphics : graphics_admissible(mountain_scene)
+  theorem mountain_target : render_target_admissible(mountain_frame)
+  theorem mountain_pipeline : render_pipeline_admissible(mountain_pipeline)
+  theorem mountain_bench : benchmark_admissible(mountain_benchmark)
+
+  proof mountain_graphics {
+    let row = row graphics mountain_scene
+    let fact = rule graphics_admissible_from_graphics(row)
+    qed fact
+  }
+  proof mountain_target {
+    let row = row render-target mountain_frame
+    let fact = rule render_target_admissible_from_render_target(row)
+    qed fact
+  }
+  proof mountain_pipeline {
+    let row = row render-pipeline mountain_pipeline
+    let fact = rule render_pipeline_admissible_from_render_pipeline(row)
+    qed fact
+  }
+  proof mountain_bench {
+    let row = row benchmark mountain_benchmark
+    let fact = rule benchmark_admissible_from_benchmark(row)
+    qed fact
+  }
+}

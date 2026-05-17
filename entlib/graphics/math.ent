@@ -1,0 +1,42 @@
+module graphics.math
+
+fn hash2(x: f64, z: f64, seed: f64) -> f64 {
+  let n: f64 = sin(x * 127.1 + z * 311.7 + seed * 17.13) * 43758.5453123
+  return fract(n)
+}
+
+fn value_noise(x: f64, z: f64, seed: f64) -> f64 {
+  let ix: f64 = floor(x)
+  let iz: f64 = floor(z)
+  let fx: f64 = x - ix
+  let fz: f64 = z - iz
+  let ux: f64 = fx * fx * (3.0 - fx * 2.0)
+  let uz: f64 = fz * fz * (3.0 - fz * 2.0)
+  let a: f64 = hash2(ix, iz, seed)
+  let b: f64 = hash2(ix + 1.0, iz, seed)
+  let c: f64 = hash2(ix, iz + 1.0, seed)
+  let d: f64 = hash2(ix + 1.0, iz + 1.0, seed)
+  let nx0: f64 = mix(a, b, ux)
+  let nx1: f64 = mix(c, d, ux)
+  return mix(nx0, nx1, uz)
+}
+
+fn fbm(x: f64, z: f64, seed: f64, octaves: f64) -> f64 {
+  let sum: f64 = 0.0
+  let amp: f64 = 0.55
+  let norm: f64 = 0.0
+  let px: f64 = x
+  let pz: f64 = z
+  for octave in range(0, octaves) {
+    sum = sum + value_noise(px, pz, seed + octave * 19.0) * amp
+    norm = norm + amp
+    px = px * 2.03
+    pz = pz * 2.03
+    amp = amp * 0.5
+  }
+  return sum / max(norm, 0.000001)
+}
+
+fn ridged(x: f64, z: f64, seed: f64, octaves: f64) -> f64 {
+  return 1.0 - abs(fbm(x, z, seed, octaves) * 2.0 - 1.0)
+}

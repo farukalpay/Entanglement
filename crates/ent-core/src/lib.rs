@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 4;
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 6;
 pub const MIN_CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 pub const MAX_MODAL_DIMENSIONS: usize = 12;
 
@@ -259,6 +259,99 @@ pub struct ValidatorContract {
     pub evidence: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphicContract {
+    pub name: String,
+    pub entry: String,
+    pub source_digest: String,
+    pub imports: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderTargetContract {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub format: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderPipelineContract {
+    pub name: String,
+    pub graphics: String,
+    pub target: String,
+    pub entry: String,
+    pub mode: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BenchmarkContract {
+    pub name: String,
+    pub graphics: String,
+    pub entry: String,
+    pub warmup: u32,
+    pub iterations: u32,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TensorContract {
+    pub name: String,
+    pub shape: Vec<String>,
+    pub dtype: String,
+    pub gradient: String,
+    pub layout: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceleratorContract {
+    pub name: String,
+    pub kind: String,
+    pub memory: String,
+    pub precision: String,
+    pub supports: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatasetContract {
+    pub name: String,
+    pub tensors: Vec<String>,
+    pub source: String,
+    pub source_digest: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelContract {
+    pub name: String,
+    pub entry: String,
+    pub inputs: Vec<String>,
+    pub parameters: Vec<String>,
+    pub outputs: Vec<String>,
+    pub ops: Vec<String>,
+    pub loss: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrainingContract {
+    pub name: String,
+    pub model: String,
+    pub dataset: String,
+    pub accelerator: String,
+    pub optimizer: String,
+    pub learning_rate: f64,
+    pub steps: u32,
+    pub batch: u32,
+    pub objective: String,
+    pub evidence: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProbabilityContract {
     pub name: String,
@@ -466,6 +559,24 @@ pub struct Certificate {
     #[serde(default)]
     pub validators: Vec<ValidatorContract>,
     #[serde(default)]
+    pub graphics: Vec<GraphicContract>,
+    #[serde(default)]
+    pub render_targets: Vec<RenderTargetContract>,
+    #[serde(default)]
+    pub render_pipelines: Vec<RenderPipelineContract>,
+    #[serde(default)]
+    pub benchmarks: Vec<BenchmarkContract>,
+    #[serde(default)]
+    pub tensors: Vec<TensorContract>,
+    #[serde(default)]
+    pub accelerators: Vec<AcceleratorContract>,
+    #[serde(default)]
+    pub datasets: Vec<DatasetContract>,
+    #[serde(default)]
+    pub models: Vec<ModelContract>,
+    #[serde(default)]
+    pub trainings: Vec<TrainingContract>,
+    #[serde(default)]
     pub machines: Vec<MachineContract>,
     #[serde(default)]
     pub memory: Vec<MemoryContract>,
@@ -499,6 +610,15 @@ pub struct CheckedRows {
     pub selections: usize,
     pub transforms: usize,
     pub validators: usize,
+    pub graphics: usize,
+    pub render_targets: usize,
+    pub render_pipelines: usize,
+    pub benchmarks: usize,
+    pub tensors: usize,
+    pub accelerators: usize,
+    pub datasets: usize,
+    pub models: usize,
+    pub trainings: usize,
     pub machines: usize,
     pub memory: usize,
     pub instructions: usize,
@@ -528,6 +648,15 @@ pub enum InstabilityKind {
     SelectionInadmissible,
     TransformInadmissible,
     ValidatorInadmissible,
+    GraphicsInadmissible,
+    RenderTargetInadmissible,
+    RenderPipelineInadmissible,
+    BenchmarkInadmissible,
+    TensorInadmissible,
+    AcceleratorInadmissible,
+    DatasetInadmissible,
+    ModelInadmissible,
+    TrainingInadmissible,
     MachineInadmissible,
     MemoryInadmissible,
     InstructionInadmissible,

@@ -81,6 +81,15 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.selections += check_selections(cert)?;
     checked.transforms += check_transforms(cert)?;
     checked.validators += check_validators(cert)?;
+    checked.graphics += check_graphics(cert)?;
+    checked.render_targets += check_render_targets(cert)?;
+    checked.render_pipelines += check_render_pipelines(cert)?;
+    checked.benchmarks += check_benchmarks(cert)?;
+    checked.tensors += check_tensors(cert)?;
+    checked.accelerators += check_accelerators(cert)?;
+    checked.datasets += check_datasets(cert)?;
+    checked.models += check_models(cert)?;
+    checked.trainings += check_trainings(cert)?;
     checked.proof_artifacts += check_proof_artifacts(cert)?;
     checked.machines += check_machines(cert)?;
     checked.memory += check_machine_memory(cert)?;
@@ -88,6 +97,8 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.abis += check_abis(cert)?;
     checked.proofs += check_proofs(cert)?;
     check_workspace_proof_obligations(cert)?;
+    check_graphics_proof_obligations(cert)?;
+    check_tensor_proof_obligations(cert)?;
     check_machine_proof_obligations(cert)?;
 
     let type_map = type_map(cert, &states)?;
@@ -957,6 +968,520 @@ fn check_validators(cert: &Certificate) -> Result<usize, KernelError> {
     Ok(cert.validators.len())
 }
 
+fn check_graphics(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for graphics in &cert.graphics {
+        require_evidence("graphics", &graphics.name, &graphics.evidence)?;
+        if !names.insert(graphics.name.as_str()) {
+            return fail(
+                InstabilityKind::GraphicsInadmissible,
+                "graphics contract names must be unique",
+                vec![graphics.name.clone()],
+            );
+        }
+        if graphics.name.is_empty()
+            || graphics.entry.is_empty()
+            || graphics.source_digest.is_empty()
+            || !graphics.source_digest.starts_with("sha256:")
+        {
+            return fail(
+                InstabilityKind::GraphicsInadmissible,
+                "graphics contract must name entry point and sha256 source digest",
+                vec![graphics.name.clone()],
+            );
+        }
+        if graphics
+            .imports
+            .iter()
+            .any(|import| import.is_empty() || import.contains("..") || import.starts_with('/'))
+        {
+            return fail(
+                InstabilityKind::GraphicsInadmissible,
+                "graphics imports must be explicit library-relative paths",
+                vec![graphics.name.clone()],
+            );
+        }
+    }
+    Ok(cert.graphics.len())
+}
+
+fn check_render_targets(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for target in &cert.render_targets {
+        require_evidence("render-target", &target.name, &target.evidence)?;
+        if !names.insert(target.name.as_str()) {
+            return fail(
+                InstabilityKind::RenderTargetInadmissible,
+                "render target names must be unique",
+                vec![target.name.clone()],
+            );
+        }
+        if target.name.is_empty()
+            || target.width == 0
+            || target.height == 0
+            || target.width > 8192
+            || target.height > 8192
+            || !matches!(target.format.as_str(), "rgba8" | "rgb8")
+        {
+            return fail(
+                InstabilityKind::RenderTargetInadmissible,
+                "render target must declare bounded dimensions and a registered pixel format",
+                vec![
+                    target.name.clone(),
+                    target.width.to_string(),
+                    target.height.to_string(),
+                    target.format.clone(),
+                ],
+            );
+        }
+    }
+    Ok(cert.render_targets.len())
+}
+
+fn check_render_pipelines(cert: &Certificate) -> Result<usize, KernelError> {
+    let graphics: IndexSet<&str> = cert
+        .graphics
+        .iter()
+        .map(|graphics| graphics.name.as_str())
+        .collect();
+    let targets: IndexSet<&str> = cert
+        .render_targets
+        .iter()
+        .map(|target| target.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for pipeline in &cert.render_pipelines {
+        require_evidence("render-pipeline", &pipeline.name, &pipeline.evidence)?;
+        if !names.insert(pipeline.name.as_str()) {
+            return fail(
+                InstabilityKind::RenderPipelineInadmissible,
+                "render pipeline names must be unique",
+                vec![pipeline.name.clone()],
+            );
+        }
+        if !graphics.contains(pipeline.graphics.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "render pipeline references undeclared graphics contract",
+                vec![pipeline.name.clone(), pipeline.graphics.clone()],
+            );
+        }
+        if !targets.contains(pipeline.target.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "render pipeline references undeclared render target",
+                vec![pipeline.name.clone(), pipeline.target.clone()],
+            );
+        }
+        if pipeline.entry.is_empty()
+            || !matches!(pipeline.mode.as_str(), "interpret" | "ir" | "native")
+        {
+            return fail(
+                InstabilityKind::RenderPipelineInadmissible,
+                "render pipeline must name an entry point and registered execution mode",
+                vec![pipeline.name.clone(), pipeline.mode.clone()],
+            );
+        }
+    }
+    Ok(cert.render_pipelines.len())
+}
+
+fn check_benchmarks(cert: &Certificate) -> Result<usize, KernelError> {
+    let graphics: IndexSet<&str> = cert
+        .graphics
+        .iter()
+        .map(|graphics| graphics.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for benchmark in &cert.benchmarks {
+        require_evidence("benchmark", &benchmark.name, &benchmark.evidence)?;
+        if !names.insert(benchmark.name.as_str()) {
+            return fail(
+                InstabilityKind::BenchmarkInadmissible,
+                "benchmark names must be unique",
+                vec![benchmark.name.clone()],
+            );
+        }
+        if !graphics.contains(benchmark.graphics.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "benchmark references undeclared graphics contract",
+                vec![benchmark.name.clone(), benchmark.graphics.clone()],
+            );
+        }
+        if benchmark.entry.is_empty() || benchmark.iterations == 0 || benchmark.iterations > 10_000
+        {
+            return fail(
+                InstabilityKind::BenchmarkInadmissible,
+                "benchmark must name an entry point and bounded positive iteration count",
+                vec![benchmark.name.clone(), benchmark.iterations.to_string()],
+            );
+        }
+    }
+    Ok(cert.benchmarks.len())
+}
+
+fn check_tensors(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for tensor in &cert.tensors {
+        require_evidence("tensor", &tensor.name, &tensor.evidence)?;
+        if !names.insert(tensor.name.as_str()) {
+            return fail(
+                InstabilityKind::TensorInadmissible,
+                "tensor names must be unique",
+                vec![tensor.name.clone()],
+            );
+        }
+        if tensor.name.is_empty()
+            || tensor.shape.is_empty()
+            || !registered_tensor_dtype(&tensor.dtype)
+            || !matches!(tensor.gradient.as_str(), "none" | "tracked")
+            || tensor.layout.is_empty()
+            || tensor.shape.iter().any(|dim| !valid_shape_dim(dim))
+        {
+            return fail(
+                InstabilityKind::TensorInadmissible,
+                "tensor row must declare shape, dtype, gradient policy, and layout",
+                vec![
+                    tensor.name.clone(),
+                    tensor.shape.join(","),
+                    tensor.dtype.clone(),
+                    tensor.gradient.clone(),
+                    tensor.layout.clone(),
+                ],
+            );
+        }
+    }
+    Ok(cert.tensors.len())
+}
+
+fn check_accelerators(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for accelerator in &cert.accelerators {
+        require_evidence("accelerator", &accelerator.name, &accelerator.evidence)?;
+        if !names.insert(accelerator.name.as_str()) {
+            return fail(
+                InstabilityKind::AcceleratorInadmissible,
+                "accelerator names must be unique",
+                vec![accelerator.name.clone()],
+            );
+        }
+        if accelerator.name.is_empty()
+            || accelerator.kind.is_empty()
+            || accelerator.memory.is_empty()
+            || !registered_tensor_dtype(&accelerator.precision)
+            || accelerator.supports.is_empty()
+            || accelerator.supports.iter().any(|op| !valid_symbol(op))
+        {
+            return fail(
+                InstabilityKind::AcceleratorInadmissible,
+                "accelerator row must declare kind, memory, precision, and supported ops",
+                vec![
+                    accelerator.name.clone(),
+                    accelerator.kind.clone(),
+                    accelerator.memory.clone(),
+                    accelerator.precision.clone(),
+                ],
+            );
+        }
+    }
+    Ok(cert.accelerators.len())
+}
+
+fn check_datasets(cert: &Certificate) -> Result<usize, KernelError> {
+    let tensors: IndexSet<&str> = cert
+        .tensors
+        .iter()
+        .map(|tensor| tensor.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for dataset in &cert.datasets {
+        require_evidence("dataset", &dataset.name, &dataset.evidence)?;
+        if !names.insert(dataset.name.as_str()) {
+            return fail(
+                InstabilityKind::DatasetInadmissible,
+                "dataset names must be unique",
+                vec![dataset.name.clone()],
+            );
+        }
+        if dataset.name.is_empty()
+            || dataset.tensors.is_empty()
+            || dataset.source.is_empty()
+            || !dataset.source_digest.starts_with("sha256:")
+        {
+            return fail(
+                InstabilityKind::DatasetInadmissible,
+                "dataset row must name tensors, source, and sha256 digest",
+                vec![dataset.name.clone(), dataset.source_digest.clone()],
+            );
+        }
+        for tensor in &dataset.tensors {
+            if !tensors.contains(tensor.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "dataset references undeclared tensor",
+                    vec![dataset.name.clone(), tensor.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.datasets.len())
+}
+
+fn check_models(cert: &Certificate) -> Result<usize, KernelError> {
+    let tensors: IndexSet<&str> = cert
+        .tensors
+        .iter()
+        .map(|tensor| tensor.name.as_str())
+        .collect();
+    let mut names = IndexSet::new();
+    for model in &cert.models {
+        require_evidence("model", &model.name, &model.evidence)?;
+        if !names.insert(model.name.as_str()) {
+            return fail(
+                InstabilityKind::ModelInadmissible,
+                "model names must be unique",
+                vec![model.name.clone()],
+            );
+        }
+        if model.name.is_empty()
+            || model.entry.is_empty()
+            || model.inputs.is_empty()
+            || model.outputs.is_empty()
+            || model.ops.is_empty()
+            || model.loss.is_empty()
+        {
+            return fail(
+                InstabilityKind::ModelInadmissible,
+                "model row must declare entry, inputs, outputs, ops, and loss",
+                vec![model.name.clone()],
+            );
+        }
+        for tensor in model
+            .inputs
+            .iter()
+            .chain(model.parameters.iter())
+            .chain(model.outputs.iter())
+        {
+            if !tensors.contains(tensor.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "model references undeclared tensor",
+                    vec![model.name.clone(), tensor.clone()],
+                );
+            }
+        }
+        let mut available_values: IndexSet<String> = model
+            .inputs
+            .iter()
+            .chain(model.parameters.iter())
+            .cloned()
+            .collect();
+        for op in &model.ops {
+            let parsed = check_model_op_shape(model, op)?;
+            for arg in &parsed.args {
+                if !available_values.contains(arg) {
+                    return fail(
+                        InstabilityKind::ModelInadmissible,
+                        "model op references a value that is not yet available",
+                        vec![model.name.clone(), op.clone(), arg.clone()],
+                    );
+                }
+            }
+            available_values.insert(parsed.output);
+        }
+        for output in &model.outputs {
+            if !available_values.contains(output) {
+                return fail(
+                    InstabilityKind::ModelInadmissible,
+                    "model output is not produced by inputs, parameters, or ops",
+                    vec![model.name.clone(), output.clone()],
+                );
+            }
+        }
+        if !available_values.contains(&model.loss) {
+            return fail(
+                InstabilityKind::ModelInadmissible,
+                "model loss is not produced by inputs, parameters, or ops",
+                vec![model.name.clone(), model.loss.clone()],
+            );
+        }
+    }
+    Ok(cert.models.len())
+}
+
+fn check_trainings(cert: &Certificate) -> Result<usize, KernelError> {
+    let models: IndexMap<&str, &ent_core::ModelContract> = cert
+        .models
+        .iter()
+        .map(|model| (model.name.as_str(), model))
+        .collect();
+    let datasets: IndexSet<&str> = cert
+        .datasets
+        .iter()
+        .map(|dataset| dataset.name.as_str())
+        .collect();
+    let accelerators: IndexMap<&str, &ent_core::AcceleratorContract> = cert
+        .accelerators
+        .iter()
+        .map(|accelerator| (accelerator.name.as_str(), accelerator))
+        .collect();
+    let mut names = IndexSet::new();
+    for training in &cert.trainings {
+        require_evidence("training", &training.name, &training.evidence)?;
+        if !names.insert(training.name.as_str()) {
+            return fail(
+                InstabilityKind::TrainingInadmissible,
+                "training names must be unique",
+                vec![training.name.clone()],
+            );
+        }
+        let Some(model) = models.get(training.model.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "training references undeclared model",
+                vec![training.name.clone(), training.model.clone()],
+            );
+        };
+        if !datasets.contains(training.dataset.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "training references undeclared dataset",
+                vec![training.name.clone(), training.dataset.clone()],
+            );
+        }
+        let Some(accelerator) = accelerators.get(training.accelerator.as_str()) else {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "training references undeclared accelerator",
+                vec![training.name.clone(), training.accelerator.clone()],
+            );
+        };
+        for op in &model.ops {
+            let op_name = model_op_name(op)?;
+            if !accelerator.supports.contains(&op_name) {
+                return fail(
+                    InstabilityKind::TrainingInadmissible,
+                    "training accelerator does not cover a model op",
+                    vec![training.name.clone(), training.accelerator.clone(), op_name],
+                );
+            }
+        }
+        if training.optimizer.is_empty()
+            || training.objective.is_empty()
+            || training.accelerator.is_empty()
+            || training.steps == 0
+            || training.batch == 0
+            || !training.learning_rate.is_finite()
+            || training.learning_rate <= 0.0
+        {
+            return fail(
+                InstabilityKind::TrainingInadmissible,
+                "training row must declare optimizer, objective, positive steps, batch, and learning rate",
+                vec![
+                    training.name.clone(),
+                    training.optimizer.clone(),
+                    training.learning_rate.to_string(),
+                ],
+            );
+        }
+    }
+    Ok(cert.trainings.len())
+}
+
+fn model_op_name(op: &str) -> Result<String, KernelError> {
+    let Some((call, _)) = op.split_once("->") else {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op must be written as op(args)->value",
+            vec![op.to_owned()],
+        );
+    };
+    let Some((name, _)) = call.split_once('(') else {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op lacks argument list",
+            vec![op.to_owned()],
+        );
+    };
+    Ok(name.trim().to_owned())
+}
+
+fn registered_tensor_dtype(dtype: &str) -> bool {
+    matches!(
+        dtype,
+        "f16" | "bf16" | "f32" | "f64" | "i32" | "i64" | "bool"
+    )
+}
+
+fn valid_shape_dim(dim: &str) -> bool {
+    dim.parse::<u64>().is_ok_and(|value| value > 0) || valid_symbol(dim)
+}
+
+fn valid_symbol(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
+}
+
+struct ModelOpParts {
+    args: Vec<String>,
+    output: String,
+}
+
+fn check_model_op_shape(
+    model: &ent_core::ModelContract,
+    op: &str,
+) -> Result<ModelOpParts, KernelError> {
+    let Some((call, output)) = op.split_once("->") else {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op must be written as op(args)->value",
+            vec![model.name.clone(), op.to_owned()],
+        );
+    };
+    let Some(open) = call.find('(') else {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op lacks argument list",
+            vec![model.name.clone(), op.to_owned()],
+        );
+    };
+    let Some(args) = call.strip_suffix(')') else {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op argument list is not closed",
+            vec![model.name.clone(), op.to_owned()],
+        );
+    };
+    let op_name = call[..open].trim();
+    let args = &args[open + 1..];
+    let output = output.trim();
+    if !valid_symbol(op_name) || !valid_symbol(output) {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op must name a symbolic op and output",
+            vec![model.name.clone(), op.to_owned()],
+        );
+    }
+    let args = args
+        .split(',')
+        .map(str::trim)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if args.iter().any(|arg| arg.is_empty() || !valid_symbol(arg)) {
+        return fail(
+            InstabilityKind::ModelInadmissible,
+            "model op arguments must be symbolic tensor names",
+            vec![model.name.clone(), op.to_owned()],
+        );
+    }
+    Ok(ModelOpParts {
+        args,
+        output: output.to_owned(),
+    })
+}
+
 fn check_proof_artifacts(cert: &Certificate) -> Result<usize, KernelError> {
     let mut names = IndexSet::new();
     for artifact in &cert.proof_artifacts {
@@ -1250,6 +1775,86 @@ fn check_workspace_proof_obligations(cert: &Certificate) -> Result<(), KernelErr
     Ok(())
 }
 
+fn check_graphics_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
+    for graphics in &cert.graphics {
+        require_proof(
+            cert,
+            PropositionKind::GraphicsAdmissible,
+            &graphics.name,
+            "graphics contract lacks an admissibility proof",
+        )?;
+    }
+    for target in &cert.render_targets {
+        require_proof(
+            cert,
+            PropositionKind::RenderTargetAdmissible,
+            &target.name,
+            "render target lacks an admissibility proof",
+        )?;
+    }
+    for pipeline in &cert.render_pipelines {
+        require_proof(
+            cert,
+            PropositionKind::RenderPipelineAdmissible,
+            &pipeline.name,
+            "render pipeline lacks an admissibility proof",
+        )?;
+    }
+    for benchmark in &cert.benchmarks {
+        require_proof(
+            cert,
+            PropositionKind::BenchmarkAdmissible,
+            &benchmark.name,
+            "benchmark lacks an admissibility proof",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_tensor_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
+    for tensor in &cert.tensors {
+        require_proof(
+            cert,
+            PropositionKind::TensorAdmissible,
+            &tensor.name,
+            "tensor contract lacks an admissibility proof",
+        )?;
+    }
+    for accelerator in &cert.accelerators {
+        require_proof(
+            cert,
+            PropositionKind::AcceleratorAdmissible,
+            &accelerator.name,
+            "accelerator contract lacks an admissibility proof",
+        )?;
+    }
+    for dataset in &cert.datasets {
+        require_proof(
+            cert,
+            PropositionKind::DatasetAdmissible,
+            &dataset.name,
+            "dataset contract lacks an admissibility proof",
+        )?;
+    }
+    for model in &cert.models {
+        require_proof(
+            cert,
+            PropositionKind::ModelAdmissible,
+            &model.name,
+            "model contract lacks an admissibility proof",
+        )?;
+    }
+    for training in &cert.trainings {
+        require_proof(
+            cert,
+            PropositionKind::TrainingAdmissible,
+            &training.name,
+            "training contract lacks an admissibility proof",
+        )?;
+    }
+    Ok(())
+}
+
 fn check_machine_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
     for artifact in &cert.proof_artifacts {
         require_proof(
@@ -1469,6 +2074,47 @@ impl ProofEnvironment for CertificateProofEnvironment<'_> {
                 .validators
                 .iter()
                 .any(|validator| validator.name == subject),
+            RowKind::Graphics => self
+                .cert
+                .graphics
+                .iter()
+                .any(|graphics| graphics.name == subject),
+            RowKind::RenderTarget => self
+                .cert
+                .render_targets
+                .iter()
+                .any(|target| target.name == subject),
+            RowKind::RenderPipeline => self
+                .cert
+                .render_pipelines
+                .iter()
+                .any(|pipeline| pipeline.name == subject),
+            RowKind::Benchmark => self
+                .cert
+                .benchmarks
+                .iter()
+                .any(|benchmark| benchmark.name == subject),
+            RowKind::Tensor => self
+                .cert
+                .tensors
+                .iter()
+                .any(|tensor| tensor.name == subject),
+            RowKind::Accelerator => self
+                .cert
+                .accelerators
+                .iter()
+                .any(|accelerator| accelerator.name == subject),
+            RowKind::Dataset => self
+                .cert
+                .datasets
+                .iter()
+                .any(|dataset| dataset.name == subject),
+            RowKind::Model => self.cert.models.iter().any(|model| model.name == subject),
+            RowKind::Training => self
+                .cert
+                .trainings
+                .iter()
+                .any(|training| training.name == subject),
         }
     }
 

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Entanglement",
+  "scopeName": "source.ent",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.ent",
+      "match": "//.*$"
+    },
+    {
+      "name": "string.quoted.double.ent",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.ent",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "keyword.declaration.ent",
+      "match": "\\b(world|state|relation|law|invariant|effect|external|workspace|parser|document|select|transform|validator|graphics|render-target|render-pipeline|benchmark|tensor|accelerator|dataset|model|training|machine|memory|instruction|abi|proof-artifact|evolve|ad|measure|theorem|proof|module|import|fn|let|return|if|else|for|in)\\b"
+    },
+    {
+      "name": "keyword.control.ent",
+      "match": "\\b(evidence|shape|dtype|gradient|layout|kind|supports|source|digest|entry|inputs|parameters|outputs|ops|loss|optimizer|steps|batch|objective|learning-rate|uses|preserves|changes|by|differentiable)\\b"
+    },
+    {
+      "name": "constant.numeric.ent",
+      "match": "\\b(0x[0-9a-fA-F]+|[0-9]+(\\.[0-9]+)?)\\b"
+    },
+    {
+      "name": "support.function.proof.ent",
+      "match": "\\b(row|rule|qed)\\b"
+    },
+    {
+      "name": "storage.type.ent",
+      "match": "\\b(f16|bf16|f32|f64|i32|i64|bool|Resource|Semantic|Set)\\b"
+    }
+  ]
+}
