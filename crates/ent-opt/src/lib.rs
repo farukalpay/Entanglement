@@ -78,6 +78,34 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
         .validators
         .sort_by(|left, right| left.name.cmp(&right.name));
     after
+        .objectives
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .milestones
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .tasks
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for task in &mut after.tasks {
+        task.requires.sort();
+        task.outputs.sort();
+    }
+    after
+        .gates
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .decisions
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for decision in &mut after.decisions {
+        decision.alternatives.sort();
+    }
+    after
+        .notes
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for note in &mut after.notes {
+        note.tags.sort();
+    }
+    after
         .graphics
         .sort_by(|left, right| left.name.cmp(&right.name));
     for graphics in &mut after.graphics {
@@ -170,7 +198,7 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
 
     let verification = verify(&after)?;
     Ok(RewriteProof {
-        name: "canonicalize-certificate-v7".to_owned(),
+        name: "canonicalize-certificate-v8".to_owned(),
         before: cert.clone(),
         after,
         verification,

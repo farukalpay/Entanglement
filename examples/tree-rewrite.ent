@@ -1,0 +1,50 @@
+world TreeRewrite(agent Operator) {
+  state tree : Resource
+
+  workspace repo uses filesystem write evidence tree_rewrite_boundary
+  select all_files = files where all_files() evidence full_tree_scope
+
+  transform replace_title replace_text on all_files from "OldName" to "NewName" evidence title_text_replace
+  transform replace_lower replace_text on all_files from "oldname" to "newname" evidence lower_text_replace
+  transform replace_token replace_word on all_files from "OLDTOKEN" to "NEWTOKEN" evidence token_text_replace
+  transform rename_title rename_paths on all_files from "OldName" to "NewName" evidence title_path_replace
+  transform rename_lower rename_paths on all_files from "oldname" to "newname" evidence lower_path_replace
+
+  theorem all_files_selection : selection_admissible(all_files)
+  theorem replace_title_safe : transform_admissible(replace_title)
+  theorem replace_lower_safe : transform_admissible(replace_lower)
+  theorem replace_token_safe : transform_admissible(replace_token)
+  theorem rename_title_safe : transform_admissible(rename_title)
+  theorem rename_lower_safe : transform_admissible(rename_lower)
+
+  proof all_files_selection {
+    let row = row selection all_files
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof replace_title_safe {
+    let row = row transform replace_title
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_lower_safe {
+    let row = row transform replace_lower
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_token_safe {
+    let row = row transform replace_token
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof rename_title_safe {
+    let row = row transform rename_title
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof rename_lower_safe {
+    let row = row transform rename_lower
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}

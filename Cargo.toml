@@ -7,6 +7,7 @@ members = [
     "crates/ent-elab",
     "crates/ent-opt",
     "crates/ent-transform",
+    "crates/ent-inspect",
     "crates/ent-tensor",
     "crates/ent-graphics",
     "crates/ent-native-gfx",

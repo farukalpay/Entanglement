@@ -83,6 +83,12 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.selections += check_selections(cert)?;
     checked.transforms += check_transforms(cert)?;
     checked.validators += check_validators(cert)?;
+    checked.objectives += check_objectives(cert)?;
+    checked.milestones += check_milestones(cert)?;
+    checked.tasks += check_tasks(cert)?;
+    checked.gates += check_gates(cert)?;
+    checked.decisions += check_decisions(cert)?;
+    checked.notes += check_notes(cert)?;
     checked.graphics += check_graphics(cert)?;
     checked.render_targets += check_render_targets(cert)?;
     checked.render_pipelines += check_render_pipelines(cert)?;
@@ -104,6 +110,7 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.abis += check_abis(cert)?;
     checked.proofs += check_proofs(cert)?;
     check_workspace_proof_obligations(cert)?;
+    check_protocol_proof_obligations(cert)?;
     check_graphics_proof_obligations(cert)?;
     check_tensor_proof_obligations(cert)?;
     check_runtime_boundary_proof_obligations(cert)?;
@@ -932,14 +939,25 @@ fn check_transform_shape(transform: &ent_core::TransformContract) -> Result<(), 
             }
         }
         "replace_text" | "replace_word" => {
-            if !matches!(transform.target, TransformTarget::File(_))
+            if transform.destination.is_some()
+                || transform.predicate.is_some()
+                || transform.replacement.is_none()
+            {
+                return invalid_transform(
+                    transform,
+                    "replacement transforms require a target plus from/to literals",
+                );
+            }
+        }
+        "rename_paths" => {
+            if !matches!(transform.target, TransformTarget::Selection(_))
                 || transform.destination.is_some()
                 || transform.predicate.is_some()
                 || transform.replacement.is_none()
             {
                 return invalid_transform(
                     transform,
-                    "replacement transforms require a file target plus from/to literals",
+                    "rename_paths requires a selection target plus from/to literals",
                 );
             }
         }
@@ -974,6 +992,328 @@ fn check_validators(cert: &Certificate) -> Result<usize, KernelError> {
         }
     }
     Ok(cert.validators.len())
+}
+
+fn check_objectives(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for objective in &cert.objectives {
+        require_evidence("objective", &objective.name, &objective.evidence)?;
+        if !names.insert(objective.name.as_str()) {
+            return fail(
+                InstabilityKind::ObjectiveInadmissible,
+                "objective names must be unique",
+                vec![objective.name.clone()],
+            );
+        }
+        if !valid_identifier(&objective.name) || objective.summary.trim().is_empty() {
+            return fail(
+                InstabilityKind::ObjectiveInadmissible,
+                "objective must have a stable name and summary",
+                vec![objective.name.clone()],
+            );
+        }
+        if !matches!(
+            objective.priority.as_str(),
+            "low" | "medium" | "high" | "critical"
+        ) {
+            return fail(
+                InstabilityKind::ObjectiveInadmissible,
+                "objective priority is not registered",
+                vec![objective.name.clone(), objective.priority.clone()],
+            );
+        }
+    }
+    Ok(cert.objectives.len())
+}
+
+fn check_milestones(cert: &Certificate) -> Result<usize, KernelError> {
+    let objective_names = cert
+        .objectives
+        .iter()
+        .map(|objective| objective.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for milestone in &cert.milestones {
+        require_evidence("milestone", &milestone.name, &milestone.evidence)?;
+        if !names.insert(milestone.name.as_str()) {
+            return fail(
+                InstabilityKind::MilestoneInadmissible,
+                "milestone names must be unique",
+                vec![milestone.name.clone()],
+            );
+        }
+        if !valid_identifier(&milestone.name) {
+            return fail(
+                InstabilityKind::MilestoneInadmissible,
+                "milestone name must be stable",
+                vec![milestone.name.clone()],
+            );
+        }
+        if !objective_names.contains(milestone.objective.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "milestone references an undeclared objective",
+                vec![milestone.name.clone(), milestone.objective.clone()],
+            );
+        }
+        if !matches!(
+            milestone.state.as_str(),
+            "planned" | "active" | "blocked" | "done" | "dropped"
+        ) {
+            return fail(
+                InstabilityKind::MilestoneInadmissible,
+                "milestone state is not registered",
+                vec![milestone.name.clone(), milestone.state.clone()],
+            );
+        }
+        if !valid_due(&milestone.due) {
+            return fail(
+                InstabilityKind::MilestoneInadmissible,
+                "milestone due value must be YYYY-MM-DD or unscheduled",
+                vec![milestone.name.clone(), milestone.due.clone()],
+            );
+        }
+    }
+    Ok(cert.milestones.len())
+}
+
+fn check_tasks(cert: &Certificate) -> Result<usize, KernelError> {
+    let milestone_names = cert
+        .milestones
+        .iter()
+        .map(|milestone| milestone.name.as_str())
+        .collect::<IndexSet<_>>();
+    let task_names = cert
+        .tasks
+        .iter()
+        .map(|task| task.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for task in &cert.tasks {
+        require_evidence("task", &task.name, &task.evidence)?;
+        if !names.insert(task.name.as_str()) {
+            return fail(
+                InstabilityKind::TaskInadmissible,
+                "task names must be unique",
+                vec![task.name.clone()],
+            );
+        }
+        if !valid_identifier(&task.name)
+            || task.title.trim().is_empty()
+            || task.owner.trim().is_empty()
+        {
+            return fail(
+                InstabilityKind::TaskInadmissible,
+                "task must have a stable name, title, and owner",
+                vec![task.name.clone()],
+            );
+        }
+        if !milestone_names.contains(task.milestone.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "task references an undeclared milestone",
+                vec![task.name.clone(), task.milestone.clone()],
+            );
+        }
+        if !matches!(
+            task.kind.as_str(),
+            "research"
+                | "design"
+                | "implement"
+                | "verify"
+                | "document"
+                | "release"
+                | "cleanup"
+                | "migration"
+                | "review"
+        ) {
+            return fail(
+                InstabilityKind::TaskInadmissible,
+                "task kind is not registered",
+                vec![task.name.clone(), task.kind.clone()],
+            );
+        }
+        if !matches!(
+            task.state.as_str(),
+            "todo" | "ready" | "active" | "blocked" | "done" | "dropped"
+        ) {
+            return fail(
+                InstabilityKind::TaskInadmissible,
+                "task state is not registered",
+                vec![task.name.clone(), task.state.clone()],
+            );
+        }
+        let mut requires = IndexSet::new();
+        for dependency in &task.requires {
+            if dependency == &task.name || !requires.insert(dependency.as_str()) {
+                return fail(
+                    InstabilityKind::TaskInadmissible,
+                    "task dependency list must be unique and not self-referential",
+                    vec![task.name.clone(), dependency.clone()],
+                );
+            }
+            if !task_names.contains(dependency.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "task dependency references an undeclared task",
+                    vec![task.name.clone(), dependency.clone()],
+                );
+            }
+        }
+        if task.outputs.iter().any(|output| output.trim().is_empty()) {
+            return fail(
+                InstabilityKind::TaskInadmissible,
+                "task outputs must not contain empty entries",
+                vec![task.name.clone()],
+            );
+        }
+    }
+    Ok(cert.tasks.len())
+}
+
+fn check_gates(cert: &Certificate) -> Result<usize, KernelError> {
+    let task_names = cert
+        .tasks
+        .iter()
+        .map(|task| task.name.as_str())
+        .collect::<IndexSet<_>>();
+    let validator_names = cert
+        .validators
+        .iter()
+        .map(|validator| validator.name.as_str())
+        .collect::<IndexSet<_>>();
+    let transform_names = cert
+        .transforms
+        .iter()
+        .map(|transform| transform.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for gate in &cert.gates {
+        require_evidence("gate", &gate.name, &gate.evidence)?;
+        if !names.insert(gate.name.as_str()) {
+            return fail(
+                InstabilityKind::GateInadmissible,
+                "gate names must be unique",
+                vec![gate.name.clone()],
+            );
+        }
+        if !valid_identifier(&gate.name) {
+            return fail(
+                InstabilityKind::GateInadmissible,
+                "gate name must be stable",
+                vec![gate.name.clone()],
+            );
+        }
+        if !task_names.contains(gate.task.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "gate references an undeclared task",
+                vec![gate.name.clone(), gate.task.clone()],
+            );
+        }
+        if !valid_gate_check(&gate.check, &validator_names, &transform_names)? {
+            return fail(
+                InstabilityKind::GateInadmissible,
+                "gate check is not registered",
+                vec![gate.name.clone(), gate.check.clone()],
+            );
+        }
+        if !matches!(
+            gate.expect.as_str(),
+            "pass" | "fail" | "changed" | "unchanged" | "present" | "absent" | "recorded"
+        ) {
+            return fail(
+                InstabilityKind::GateInadmissible,
+                "gate expectation is not registered",
+                vec![gate.name.clone(), gate.expect.clone()],
+            );
+        }
+    }
+    Ok(cert.gates.len())
+}
+
+fn check_decisions(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let mut names = IndexSet::new();
+    for decision in &cert.decisions {
+        require_evidence("decision", &decision.name, &decision.evidence)?;
+        if !names.insert(decision.name.as_str()) {
+            return fail(
+                InstabilityKind::DecisionInadmissible,
+                "decision names must be unique",
+                vec![decision.name.clone()],
+            );
+        }
+        if !valid_identifier(&decision.name)
+            || decision.choice.trim().is_empty()
+            || decision.rationale.trim().is_empty()
+        {
+            return fail(
+                InstabilityKind::DecisionInadmissible,
+                "decision must have a stable name, choice, and rationale",
+                vec![decision.name.clone()],
+            );
+        }
+        if !scope_exists(&decision.scope, &scopes) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "decision references an undeclared scope",
+                vec![decision.name.clone(), decision.scope.clone()],
+            );
+        }
+        if decision
+            .alternatives
+            .iter()
+            .any(|alternative| alternative.trim().is_empty())
+        {
+            return fail(
+                InstabilityKind::DecisionInadmissible,
+                "decision alternatives must not contain empty entries",
+                vec![decision.name.clone()],
+            );
+        }
+    }
+    Ok(cert.decisions.len())
+}
+
+fn check_notes(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let mut names = IndexSet::new();
+    for note in &cert.notes {
+        require_evidence("note", &note.name, &note.evidence)?;
+        if !names.insert(note.name.as_str()) {
+            return fail(
+                InstabilityKind::NoteInadmissible,
+                "note names must be unique",
+                vec![note.name.clone()],
+            );
+        }
+        if !valid_identifier(&note.name) || note.text.trim().is_empty() {
+            return fail(
+                InstabilityKind::NoteInadmissible,
+                "note must have a stable name and text",
+                vec![note.name.clone()],
+            );
+        }
+        if !scope_exists(&note.scope, &scopes) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "note references an undeclared scope",
+                vec![note.name.clone(), note.scope.clone()],
+            );
+        }
+        let mut tags = IndexSet::new();
+        for tag in &note.tags {
+            if !valid_identifier(tag) || !tags.insert(tag.as_str()) {
+                return fail(
+                    InstabilityKind::NoteInadmissible,
+                    "note tags must be stable and unique",
+                    vec![note.name.clone(), tag.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.notes.len())
 }
 
 fn check_graphics(cert: &Certificate) -> Result<usize, KernelError> {
@@ -2232,6 +2572,58 @@ fn check_workspace_proof_obligations(cert: &Certificate) -> Result<(), KernelErr
     Ok(())
 }
 
+fn check_protocol_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
+    for objective in &cert.objectives {
+        require_proof(
+            cert,
+            PropositionKind::ObjectiveAdmissible,
+            &objective.name,
+            "objective lacks an admissibility proof",
+        )?;
+    }
+    for milestone in &cert.milestones {
+        require_proof(
+            cert,
+            PropositionKind::MilestoneAdmissible,
+            &milestone.name,
+            "milestone lacks an admissibility proof",
+        )?;
+    }
+    for task in &cert.tasks {
+        require_proof(
+            cert,
+            PropositionKind::TaskAdmissible,
+            &task.name,
+            "task lacks an admissibility proof",
+        )?;
+    }
+    for gate in &cert.gates {
+        require_proof(
+            cert,
+            PropositionKind::GateAdmissible,
+            &gate.name,
+            "gate lacks an admissibility proof",
+        )?;
+    }
+    for decision in &cert.decisions {
+        require_proof(
+            cert,
+            PropositionKind::DecisionAdmissible,
+            &decision.name,
+            "decision lacks an admissibility proof",
+        )?;
+    }
+    for note in &cert.notes {
+        require_proof(
+            cert,
+            PropositionKind::NoteAdmissible,
+            &note.name,
+            "note lacks an admissibility proof",
+        )?;
+    }
+    Ok(())
+}
+
 fn check_graphics_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
     for graphics in &cert.graphics {
         require_proof(
@@ -2433,6 +2825,146 @@ fn invalid_transform(
     )
 }
 
+fn valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+fn valid_due(value: &str) -> bool {
+    if value == "unscheduled" {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(idx, byte)| matches!(idx, 4 | 7) || byte.is_ascii_digit())
+}
+
+fn valid_gate_check(
+    check: &str,
+    validators: &IndexSet<&str>,
+    transforms: &IndexSet<&str>,
+) -> Result<bool, KernelError> {
+    let Some((kind, subject)) = check.split_once(':') else {
+        return Ok(false);
+    };
+    if subject.trim().is_empty() {
+        return Ok(false);
+    }
+    match kind {
+        "validator" => Ok(validators.contains(subject)),
+        "transform" => Ok(transforms.contains(subject)),
+        "file" => Ok(valid_relative_text(subject)),
+        "command" | "record" => Ok(!subject.contains('\0')),
+        _ => Ok(false),
+    }
+}
+
+fn valid_relative_text(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains('\0')
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && !value.split('/').any(|part| part.is_empty() || part == "..")
+}
+
+struct ProtocolScopes<'a> {
+    objectives: IndexSet<&'a str>,
+    milestones: IndexSet<&'a str>,
+    tasks: IndexSet<&'a str>,
+    gates: IndexSet<&'a str>,
+    decisions: IndexSet<&'a str>,
+    transforms: IndexSet<&'a str>,
+    validators: IndexSet<&'a str>,
+    selections: IndexSet<&'a str>,
+    parsers: IndexSet<&'a str>,
+    workspaces: IndexSet<&'a str>,
+}
+
+fn protocol_scopes(cert: &Certificate) -> ProtocolScopes<'_> {
+    ProtocolScopes {
+        objectives: cert
+            .objectives
+            .iter()
+            .map(|objective| objective.name.as_str())
+            .collect(),
+        milestones: cert
+            .milestones
+            .iter()
+            .map(|milestone| milestone.name.as_str())
+            .collect(),
+        tasks: cert.tasks.iter().map(|task| task.name.as_str()).collect(),
+        gates: cert.gates.iter().map(|gate| gate.name.as_str()).collect(),
+        decisions: cert
+            .decisions
+            .iter()
+            .map(|decision| decision.name.as_str())
+            .collect(),
+        transforms: cert
+            .transforms
+            .iter()
+            .map(|transform| transform.name.as_str())
+            .collect(),
+        validators: cert
+            .validators
+            .iter()
+            .map(|validator| validator.name.as_str())
+            .collect(),
+        selections: cert
+            .selections
+            .iter()
+            .map(|selection| selection.name.as_str())
+            .collect(),
+        parsers: cert
+            .parsers
+            .iter()
+            .map(|parser| parser.name.as_str())
+            .collect(),
+        workspaces: cert
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.name.as_str())
+            .collect(),
+    }
+}
+
+fn scope_exists(scope: &str, scopes: &ProtocolScopes<'_>) -> bool {
+    if let Some((kind, subject)) = scope.split_once(':') {
+        return match kind {
+            "objective" => scopes.objectives.contains(subject),
+            "milestone" => scopes.milestones.contains(subject),
+            "task" => scopes.tasks.contains(subject),
+            "gate" => scopes.gates.contains(subject),
+            "decision" => scopes.decisions.contains(subject),
+            "transform" => scopes.transforms.contains(subject),
+            "validator" => scopes.validators.contains(subject),
+            "selection" => scopes.selections.contains(subject),
+            "parser" => scopes.parsers.contains(subject),
+            "workspace" => scopes.workspaces.contains(subject),
+            _ => false,
+        };
+    }
+    let occurrences = [
+        scopes.objectives.contains(scope),
+        scopes.milestones.contains(scope),
+        scopes.tasks.contains(scope),
+        scopes.gates.contains(scope),
+        scopes.decisions.contains(scope),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    occurrences == 1
+}
+
 fn supported_parser_adapter(language: &str, adapter: &str) -> bool {
     if language.trim().is_empty() {
         return false;
@@ -2476,7 +3008,9 @@ fn lexical_comment_adapter(adapter: &str) -> bool {
             | "line-hash-shebang"
             | "line-slash"
             | "line-semicolon"
+            | "line-hash-semicolon"
             | "line-double-dash"
+            | "batch-comments"
             | "slash-star"
             | "slash-comments"
             | "html-comments"
@@ -2581,6 +3115,24 @@ impl ProofEnvironment for CertificateProofEnvironment<'_> {
                 .validators
                 .iter()
                 .any(|validator| validator.name == subject),
+            RowKind::Objective => self
+                .cert
+                .objectives
+                .iter()
+                .any(|objective| objective.name == subject),
+            RowKind::Milestone => self
+                .cert
+                .milestones
+                .iter()
+                .any(|milestone| milestone.name == subject),
+            RowKind::Task => self.cert.tasks.iter().any(|task| task.name == subject),
+            RowKind::Gate => self.cert.gates.iter().any(|gate| gate.name == subject),
+            RowKind::Decision => self
+                .cert
+                .decisions
+                .iter()
+                .any(|decision| decision.name == subject),
+            RowKind::Note => self.cert.notes.iter().any(|note| note.name == subject),
             RowKind::Graphics => self
                 .cert
                 .graphics

@@ -5,7 +5,7 @@ use ent_core::{
 use ent_proof::{ProofCertificate, ProofScript, Proposition, PropositionKind};
 
 #[test]
-fn certificate_v7_roundtrips_with_runtime_boundary_contract_fields() {
+fn certificate_v8_roundtrips_with_runtime_boundary_contract_fields() {
     let cert = minimal_certificate();
     assert_eq!(cert.version, CERTIFICATE_SCHEMA_VERSION);
 
@@ -17,6 +17,17 @@ fn certificate_v7_roundtrips_with_runtime_boundary_contract_fields() {
     assert!(json.get("states").is_none());
     assert!(json.get("root").is_none());
     assert!(json.get("external_capabilities").is_some());
+    assert!(json.get("workspaces").is_some());
+    assert!(json.get("parsers").is_some());
+    assert!(json.get("selections").is_some());
+    assert!(json.get("transforms").is_some());
+    assert!(json.get("validators").is_some());
+    assert!(json.get("objectives").is_some());
+    assert!(json.get("milestones").is_some());
+    assert!(json.get("tasks").is_some());
+    assert!(json.get("gates").is_some());
+    assert!(json.get("decisions").is_some());
+    assert!(json.get("notes").is_some());
     assert!(json.get("machines").is_some());
     assert!(json.get("proof_artifacts").is_some());
     assert!(json.get("graphics").is_some());
@@ -79,6 +90,12 @@ fn minimal_certificate() -> Certificate {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        objectives: vec![],
+        milestones: vec![],
+        tasks: vec![],
+        gates: vec![],
+        decisions: vec![],
+        notes: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],

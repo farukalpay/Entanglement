@@ -19,6 +19,12 @@ pub enum PropositionKind {
     SelectionAdmissible,
     TransformAdmissible,
     ValidatorAdmissible,
+    ObjectiveAdmissible,
+    MilestoneAdmissible,
+    TaskAdmissible,
+    GateAdmissible,
+    DecisionAdmissible,
+    NoteAdmissible,
     GraphicsAdmissible,
     RenderTargetAdmissible,
     RenderPipelineAdmissible,
@@ -59,6 +65,12 @@ pub enum RowKind {
     Selection,
     Transform,
     Validator,
+    Objective,
+    Milestone,
+    Task,
+    Gate,
+    Decision,
+    Note,
     Graphics,
     RenderTarget,
     RenderPipeline,
@@ -92,6 +104,12 @@ pub enum PrimitiveRule {
     SelectionAdmissibleFromSelection,
     TransformAdmissibleFromTransform,
     ValidatorAdmissibleFromValidator,
+    ObjectiveAdmissibleFromObjective,
+    MilestoneAdmissibleFromMilestone,
+    TaskAdmissibleFromTask,
+    GateAdmissibleFromGate,
+    DecisionAdmissibleFromDecision,
+    NoteAdmissibleFromNote,
     GraphicsAdmissibleFromGraphics,
     RenderTargetAdmissibleFromRenderTarget,
     RenderPipelineAdmissibleFromRenderPipeline,
@@ -187,6 +205,12 @@ pub fn parse_proposition(input: &str) -> Result<Proposition, ProofParseError> {
         "selection_admissible" => PropositionKind::SelectionAdmissible,
         "transform_admissible" => PropositionKind::TransformAdmissible,
         "validator_admissible" => PropositionKind::ValidatorAdmissible,
+        "objective_admissible" => PropositionKind::ObjectiveAdmissible,
+        "milestone_admissible" => PropositionKind::MilestoneAdmissible,
+        "task_admissible" => PropositionKind::TaskAdmissible,
+        "gate_admissible" => PropositionKind::GateAdmissible,
+        "decision_admissible" => PropositionKind::DecisionAdmissible,
+        "note_admissible" => PropositionKind::NoteAdmissible,
         "graphics_admissible" => PropositionKind::GraphicsAdmissible,
         "render_target_admissible" => PropositionKind::RenderTargetAdmissible,
         "render_pipeline_admissible" => PropositionKind::RenderPipelineAdmissible,
@@ -313,6 +337,12 @@ fn parse_row_kind(input: &str) -> Result<RowKind, ProofParseError> {
         "selection" => Ok(RowKind::Selection),
         "transform" => Ok(RowKind::Transform),
         "validator" => Ok(RowKind::Validator),
+        "objective" => Ok(RowKind::Objective),
+        "milestone" => Ok(RowKind::Milestone),
+        "task" => Ok(RowKind::Task),
+        "gate" => Ok(RowKind::Gate),
+        "decision" => Ok(RowKind::Decision),
+        "note" => Ok(RowKind::Note),
         "graphics" => Ok(RowKind::Graphics),
         "render-target" => Ok(RowKind::RenderTarget),
         "render-pipeline" => Ok(RowKind::RenderPipeline),
@@ -360,6 +390,16 @@ fn parse_rule(input: &str) -> Result<PrimitiveRule, ProofParseError> {
         "validator_admissible_from_validator" => {
             Ok(PrimitiveRule::ValidatorAdmissibleFromValidator)
         }
+        "objective_admissible_from_objective" => {
+            Ok(PrimitiveRule::ObjectiveAdmissibleFromObjective)
+        }
+        "milestone_admissible_from_milestone" => {
+            Ok(PrimitiveRule::MilestoneAdmissibleFromMilestone)
+        }
+        "task_admissible_from_task" => Ok(PrimitiveRule::TaskAdmissibleFromTask),
+        "gate_admissible_from_gate" => Ok(PrimitiveRule::GateAdmissibleFromGate),
+        "decision_admissible_from_decision" => Ok(PrimitiveRule::DecisionAdmissibleFromDecision),
+        "note_admissible_from_note" => Ok(PrimitiveRule::NoteAdmissibleFromNote),
         "graphics_admissible_from_graphics" => Ok(PrimitiveRule::GraphicsAdmissibleFromGraphics),
         "render_target_admissible_from_render_target" => {
             Ok(PrimitiveRule::RenderTargetAdmissibleFromRenderTarget)
@@ -639,6 +679,24 @@ fn rule_contract(rule: &PrimitiveRule) -> RuleContract {
         }
         PrimitiveRule::ValidatorAdmissibleFromValidator => {
             unary_rule(RowKind::Validator, PropositionKind::ValidatorAdmissible)
+        }
+        PrimitiveRule::ObjectiveAdmissibleFromObjective => {
+            unary_rule(RowKind::Objective, PropositionKind::ObjectiveAdmissible)
+        }
+        PrimitiveRule::MilestoneAdmissibleFromMilestone => {
+            unary_rule(RowKind::Milestone, PropositionKind::MilestoneAdmissible)
+        }
+        PrimitiveRule::TaskAdmissibleFromTask => {
+            unary_rule(RowKind::Task, PropositionKind::TaskAdmissible)
+        }
+        PrimitiveRule::GateAdmissibleFromGate => {
+            unary_rule(RowKind::Gate, PropositionKind::GateAdmissible)
+        }
+        PrimitiveRule::DecisionAdmissibleFromDecision => {
+            unary_rule(RowKind::Decision, PropositionKind::DecisionAdmissible)
+        }
+        PrimitiveRule::NoteAdmissibleFromNote => {
+            unary_rule(RowKind::Note, PropositionKind::NoteAdmissible)
         }
         PrimitiveRule::GraphicsAdmissibleFromGraphics => {
             unary_rule(RowKind::Graphics, PropositionKind::GraphicsAdmissible)

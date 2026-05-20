@@ -8,6 +8,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use streaming_iterator::StreamingIterator;
@@ -18,8 +19,14 @@ use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ApplyReport {
     pub world: String,
+    pub dry_run: bool,
     pub changed_files: Vec<FileChange>,
     pub validators: Vec<ValidatorReport>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyOptions {
+    pub dry_run: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -89,6 +96,14 @@ enum PendingAction {
 }
 
 pub fn apply_certificate(cert: &Certificate, repo: &Path) -> Result<ApplyReport, TransformError> {
+    apply_certificate_with_options(cert, repo, ApplyOptions::default())
+}
+
+pub fn apply_certificate_with_options(
+    cert: &Certificate,
+    repo: &Path,
+    options: ApplyOptions,
+) -> Result<ApplyReport, TransformError> {
     verify(cert)?;
     let repo = repo
         .canonicalize()
@@ -118,10 +133,13 @@ pub fn apply_certificate(cert: &Certificate, repo: &Path) -> Result<ApplyReport,
 
     let validator_reports = run_validators(&cert.validators, stage.path())?;
     let changed_files = context.materialize_report(&repo)?;
-    apply_pending_changes(&repo, stage.path(), &context.pending)?;
+    if !options.dry_run {
+        apply_pending_changes(&repo, stage.path(), &context.pending)?;
+    }
 
     Ok(ApplyReport {
         world: cert.world.clone(),
+        dry_run: options.dry_run,
         changed_files,
         validators: validator_reports,
     })
@@ -145,6 +163,7 @@ impl TransformContext<'_> {
             "delete_lines" => self.delete_lines(transform),
             "replace_text" => self.replace_text(transform, false),
             "replace_word" => self.replace_text(transform, true),
+            "rename_paths" => self.rename_paths(transform),
             other => Err(TransformError::UnsupportedTransform(other.to_owned())),
         }
     }
@@ -160,7 +179,9 @@ impl TransformContext<'_> {
             let language = parser.language.clone();
             let adapter = parser.adapter.clone();
             let path = self.root.join(&rel);
-            let source = fs::read_to_string(&path)?;
+            let Some(source) = read_utf8_transform_source(&path)? else {
+                continue;
+            };
             let rewritten = match (language.as_str(), adapter.as_str()) {
                 ("rust", "tree-sitter") => self.syntax.remove_comments("rust", &source, &rel)?,
                 ("c", "tree-sitter") => self.syntax.remove_comments("c", &source, &rel)?,
@@ -258,21 +279,62 @@ impl TransformContext<'_> {
         transform: &TransformContract,
         word_mode: bool,
     ) -> Result<(), TransformError> {
-        let rel = direct_file(transform)?;
         let replacement = transform
             .replacement
             .as_ref()
             .ok_or_else(|| TransformError::UnsupportedTransform(transform.name.clone()))?;
-        let path = self.root.join(&rel);
-        let source = fs::read_to_string(&path)?;
-        let rewritten = if word_mode {
-            replace_word(&source, replacement)
-        } else {
-            source.replace(&replacement.from, &replacement.to)
-        };
-        if rewritten != source {
-            fs::write(&path, rewritten)?;
-            self.mark_write(rel);
+        for rel in self.files_for_transform_target(transform)? {
+            let path = self.root.join(&rel);
+            let Some(source) = read_utf8_transform_source(&path)? else {
+                continue;
+            };
+            let rewritten = if word_mode {
+                replace_word(&source, replacement)
+            } else {
+                source.replace(&replacement.from, &replacement.to)
+            };
+            if rewritten != source {
+                fs::write(&path, rewritten)?;
+                self.mark_write(rel);
+            }
+        }
+        Ok(())
+    }
+
+    fn rename_paths(&mut self, transform: &TransformContract) -> Result<(), TransformError> {
+        let replacement = transform
+            .replacement
+            .as_ref()
+            .ok_or_else(|| TransformError::UnsupportedTransform(transform.name.clone()))?;
+        let mut moves = BTreeMap::new();
+        for rel in self.files_for_transform_target(transform)? {
+            let rel_text = rel.to_string_lossy();
+            if !rel_text.contains(&replacement.from) {
+                continue;
+            }
+            let renamed = rel_text.replace(&replacement.from, &replacement.to);
+            let new_rel = sanitize_relative(&renamed)?;
+            if new_rel != rel {
+                moves.insert(rel, new_rel);
+            }
+        }
+        for new_rel in moves.values() {
+            if !moves.contains_key(new_rel) && self.root.join(new_rel).exists() {
+                return Err(TransformError::FlattenCollision(display_rel(new_rel)));
+            }
+        }
+        for (old_rel, new_rel) in moves.iter().rev() {
+            let old_abs = self.root.join(old_rel);
+            if !old_abs.exists() {
+                continue;
+            }
+            let new_abs = self.root.join(new_rel);
+            if let Some(parent) = new_abs.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(&old_abs, &new_abs)?;
+            self.mark_delete(old_rel.clone());
+            self.mark_write(new_rel.clone());
         }
         Ok(())
     }
@@ -474,6 +536,7 @@ impl TransformContext<'_> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SelectionPredicate {
+    AllFiles,
     ParsedBy(Vec<String>),
     Extension(String),
     File(PathBuf),
@@ -483,6 +546,9 @@ enum SelectionPredicate {
 impl SelectionPredicate {
     fn parse(input: &str) -> Result<Self, TransformError> {
         let input = input.trim();
+        if input == "all_files()" {
+            return Ok(Self::AllFiles);
+        }
         if let Some(body) = input
             .strip_prefix("parsed_by(")
             .and_then(|tail| tail.strip_suffix(')'))
@@ -520,6 +586,7 @@ impl SelectionPredicate {
 
     fn matches(&self, context: &TransformContext<'_>, rel: &Path) -> Result<bool, TransformError> {
         match self {
+            Self::AllFiles => Ok(true),
             Self::ParsedBy(names) => {
                 for name in names {
                     let parser = context
@@ -639,8 +706,9 @@ fn apply_pending_changes(
         match action {
             PendingAction::Delete => {
                 if target.exists() {
-                    fs::remove_file(target)?;
+                    fs::remove_file(&target)?;
                 }
+                remove_empty_parent_dirs(repo, target.parent());
             }
             PendingAction::Write => {
                 if let Some(parent) = target.parent() {
@@ -651,6 +719,18 @@ fn apply_pending_changes(
         }
     }
     Ok(())
+}
+
+fn remove_empty_parent_dirs(root: &Path, mut dir: Option<&Path>) {
+    while let Some(current) = dir {
+        if current == root {
+            break;
+        }
+        if fs::remove_dir(current).is_err() {
+            break;
+        }
+        dir = current.parent();
+    }
 }
 
 fn run_validators(
@@ -854,9 +934,18 @@ enum CommentStyle {
         marker: &'static str,
         preserve_shebang: bool,
     },
+    LineAny {
+        markers: &'static [&'static str],
+        preserve_shebang: bool,
+    },
+    LinePrefixAny {
+        markers: &'static [&'static str],
+        case_insensitive: bool,
+    },
     Block {
         start: &'static str,
         end: &'static str,
+        honor_strings: bool,
     },
     LineAndBlock {
         line: &'static str,
@@ -870,6 +959,9 @@ enum StringState {
     Single { quote: u8, escaped: bool },
     Triple { quote: u8 },
 }
+
+const HASH_SEMICOLON_MARKERS: &[&str] = &["#", ";"];
+const BATCH_COMMENT_PREFIXES: &[&str] = &["rem", "::"];
 
 fn lexical_comment_style(adapter: &str) -> Option<CommentStyle> {
     match adapter {
@@ -889,13 +981,22 @@ fn lexical_comment_style(adapter: &str) -> Option<CommentStyle> {
             marker: ";",
             preserve_shebang: false,
         }),
+        "line-hash-semicolon" => Some(CommentStyle::LineAny {
+            markers: HASH_SEMICOLON_MARKERS,
+            preserve_shebang: false,
+        }),
         "line-double-dash" => Some(CommentStyle::Line {
             marker: "--",
             preserve_shebang: false,
         }),
+        "batch-comments" => Some(CommentStyle::LinePrefixAny {
+            markers: BATCH_COMMENT_PREFIXES,
+            case_insensitive: true,
+        }),
         "slash-star" => Some(CommentStyle::Block {
             start: "/*",
             end: "*/",
+            honor_strings: true,
         }),
         "slash-comments" => Some(CommentStyle::LineAndBlock {
             line: "//",
@@ -905,6 +1006,7 @@ fn lexical_comment_style(adapter: &str) -> Option<CommentStyle> {
         "html-comments" => Some(CommentStyle::Block {
             start: "<!--",
             end: "-->",
+            honor_strings: false,
         }),
         _ => None,
     }
@@ -913,53 +1015,71 @@ fn lexical_comment_style(adapter: &str) -> Option<CommentStyle> {
 fn remove_lexical_comments(
     source: &str,
     style: CommentStyle,
-    rel: &Path,
+    _rel: &Path,
 ) -> Result<String, TransformError> {
     let mut bytes = source.as_bytes().to_vec();
     let source_bytes = source.as_bytes();
     let mut state = None;
     let mut line_start = 0usize;
     let mut idx = 0usize;
-    while idx < source_bytes.len() {
+    'scan: while idx < source_bytes.len() {
         if source_bytes[idx] == b'\n' {
             line_start = idx + 1;
         }
 
-        match &mut state {
-            Some(StringState::Single { quote, escaped }) => {
-                if *escaped {
-                    *escaped = false;
-                } else if source_bytes[idx] == b'\\' {
-                    *escaped = true;
-                } else if source_bytes[idx] == *quote {
-                    state = None;
-                }
-                idx += 1;
-                continue;
-            }
-            Some(StringState::Triple { quote }) => {
-                if starts_with_bytes(source_bytes, idx, &[*quote, *quote, *quote]) {
-                    state = None;
-                    idx += 3;
-                } else {
+        if style.honor_strings() {
+            match &mut state {
+                Some(StringState::Single { quote, escaped }) => {
+                    if *escaped {
+                        *escaped = false;
+                    } else if source_bytes[idx] == b'\\' {
+                        *escaped = true;
+                    } else if source_bytes[idx] == *quote {
+                        state = None;
+                    }
                     idx += 1;
+                    continue;
                 }
-                continue;
+                Some(StringState::Triple { quote }) => {
+                    if starts_with_bytes(source_bytes, idx, &[*quote, *quote, *quote]) {
+                        state = None;
+                        idx += 3;
+                    } else {
+                        idx += 1;
+                    }
+                    continue;
+                }
+                None => {}
             }
-            None => {}
         }
 
-        if let Some((line_marker, preserve_shebang)) = style.line_marker() {
+        if let Some((line_markers, preserve_shebang)) = style.line_markers() {
             if preserve_shebang && idx == line_start && starts_with_bytes(source_bytes, idx, b"#!")
             {
                 idx = skip_to_line_end(source_bytes, idx);
                 continue;
             }
-            if starts_with_bytes(source_bytes, idx, line_marker.as_bytes()) {
-                let end = skip_to_line_end(source_bytes, idx);
-                replace_with_spaces(&mut bytes, idx, end);
-                idx = end;
-                continue;
+            for line_marker in line_markers {
+                if starts_with_bytes(source_bytes, idx, line_marker.as_bytes()) {
+                    let end = skip_to_line_end(source_bytes, idx);
+                    replace_with_spaces(&mut bytes, idx, end);
+                    idx = end;
+                    continue 'scan;
+                }
+            }
+        }
+
+        if let Some((line_prefix_markers, case_insensitive)) = style.line_prefix_markers() {
+            let line_first = first_non_whitespace_on_line(source_bytes, line_start);
+            if idx == line_first {
+                for line_marker in line_prefix_markers {
+                    if line_prefix_matches(source_bytes, idx, line_marker, case_insensitive) {
+                        let end = skip_to_line_end(source_bytes, idx);
+                        replace_with_spaces(&mut bytes, idx, end);
+                        idx = end;
+                        continue 'scan;
+                    }
+                }
             }
         }
 
@@ -967,10 +1087,8 @@ fn remove_lexical_comments(
             if starts_with_bytes(source_bytes, idx, block_start.as_bytes()) {
                 let Some(end) = find_block_end(source_bytes, idx + block_start.len(), block_end)
                 else {
-                    return Err(TransformError::SyntaxRejected {
-                        path: display_rel(rel),
-                        message: format!("unterminated lexical block comment for {block_start}"),
-                    });
+                    idx += block_start.len();
+                    continue;
                 };
                 replace_with_spaces(&mut bytes, idx, end);
                 idx = end;
@@ -978,7 +1096,7 @@ fn remove_lexical_comments(
             }
         }
 
-        if matches!(source_bytes[idx], b'\'' | b'"' | b'`') {
+        if style.honor_strings() && matches!(source_bytes[idx], b'\'' | b'"' | b'`') {
             let quote = source_bytes[idx];
             if quote != b'`' && starts_with_bytes(source_bytes, idx, &[quote, quote, quote]) {
                 state = Some(StringState::Triple { quote });
@@ -999,27 +1117,58 @@ fn remove_lexical_comments(
 }
 
 impl CommentStyle {
-    fn line_marker(self) -> Option<(&'static str, bool)> {
+    fn line_markers(self) -> Option<(Vec<&'static str>, bool)> {
         match self {
             CommentStyle::Line {
                 marker,
                 preserve_shebang,
-            } => Some((marker, preserve_shebang)),
-            CommentStyle::LineAndBlock { line, .. } => Some((line, false)),
-            CommentStyle::Block { .. } => None,
+            } => Some((vec![marker], preserve_shebang)),
+            CommentStyle::LineAny {
+                markers,
+                preserve_shebang,
+            } => Some((markers.to_vec(), preserve_shebang)),
+            CommentStyle::LineAndBlock { line, .. } => Some((vec![line], false)),
+            CommentStyle::Block { .. } | CommentStyle::LinePrefixAny { .. } => None,
+        }
+    }
+
+    fn line_prefix_markers(self) -> Option<(&'static [&'static str], bool)> {
+        match self {
+            CommentStyle::LinePrefixAny {
+                markers,
+                case_insensitive,
+            } => Some((markers, case_insensitive)),
+            _ => None,
         }
     }
 
     fn block_markers(self) -> Option<(&'static str, &'static str)> {
         match self {
-            CommentStyle::Block { start, end } => Some((start, end)),
+            CommentStyle::Block { start, end, .. } => Some((start, end)),
             CommentStyle::LineAndBlock {
                 block_start,
                 block_end,
                 ..
             } => Some((block_start, block_end)),
-            CommentStyle::Line { .. } => None,
+            CommentStyle::Line { .. }
+            | CommentStyle::LineAny { .. }
+            | CommentStyle::LinePrefixAny { .. } => None,
         }
+    }
+
+    fn honor_strings(self) -> bool {
+        match self {
+            CommentStyle::Block { honor_strings, .. } => honor_strings,
+            _ => true,
+        }
+    }
+}
+
+fn read_utf8_transform_source(path: &Path) -> Result<Option<String>, TransformError> {
+    match fs::read_to_string(path) {
+        Ok(source) => Ok(Some(source)),
+        Err(error) if error.kind() == ErrorKind::InvalidData => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -1034,6 +1183,36 @@ fn skip_to_line_end(source: &[u8], start: usize) -> usize {
         .iter()
         .position(|byte| *byte == b'\n' || *byte == b'\r')
         .map_or(source.len(), |offset| start + offset)
+}
+
+fn first_non_whitespace_on_line(source: &[u8], line_start: usize) -> usize {
+    let mut idx = line_start;
+    while idx < source.len() && matches!(source[idx], b' ' | b'\t') {
+        idx += 1;
+    }
+    idx
+}
+
+fn line_prefix_matches(source: &[u8], idx: usize, marker: &str, case_insensitive: bool) -> bool {
+    let marker_bytes = marker.as_bytes();
+    if source.len() < idx + marker_bytes.len() {
+        return false;
+    }
+    let candidate = &source[idx..idx + marker_bytes.len()];
+    let matches = if case_insensitive {
+        candidate.eq_ignore_ascii_case(marker_bytes)
+    } else {
+        candidate == marker_bytes
+    };
+    if !matches {
+        return false;
+    }
+    if marker.eq_ignore_ascii_case("rem") {
+        return source
+            .get(idx + marker_bytes.len())
+            .map_or(true, |byte| matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'));
+    }
+    true
 }
 
 fn find_block_end(source: &[u8], start: usize, marker: &str) -> Option<usize> {

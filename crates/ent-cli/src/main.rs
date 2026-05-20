@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ent_core::{BackendKind, CERTIFICATE_SCHEMA_VERSION};
 use ent_elab::elaborate_source;
 use ent_graphics::{bench_path, render_file, RenderMode, RenderOptions};
+use ent_inspect::{inspect_path, render_markdown, InspectOptions};
 use ent_kernel::verify;
 use ent_tensor::{
     generate_python_binding, run_tensor_benchmark, verify_artifact_manifest, verify_witness,
@@ -68,6 +69,13 @@ enum Command {
         source: PathBuf,
         #[arg(long)]
         repo: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Plan {
+        source: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -144,6 +152,21 @@ enum Command {
         output: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+    Inspect {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        markdown: bool,
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        include_hidden: bool,
+        #[arg(long)]
+        max_file_bytes: Option<u64>,
+        #[arg(long)]
+        fail_on_diagnostics: bool,
     },
     Doctor {
         #[arg(long)]
@@ -289,18 +312,45 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Command::Apply { source, repo, json } => {
+        Command::Apply {
+            source,
+            repo,
+            dry_run,
+            json,
+        } => {
             let cert = load_and_elaborate(&source)?;
             verify(&cert)?;
-            let report = ent_transform::apply_certificate(&cert, &repo)?;
+            let report = ent_transform::apply_certificate_with_options(
+                &cert,
+                &repo,
+                ent_transform::ApplyOptions { dry_run },
+            )?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!(
-                    "APPLY world={} changed_files={} validators={}",
+                    "APPLY world={} dry_run={} changed_files={} validators={}",
                     report.world,
+                    report.dry_run,
                     report.changed_files.len(),
                     report.validators.len()
+                );
+            }
+        }
+        Command::Plan { source, json } => {
+            let cert = load_and_elaborate(&source)?;
+            let report = verify(&cert)?;
+            let result = protocol_report(&cert, &report);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "PLAN OK world={} objectives={} milestones={} tasks={} gates={}",
+                    result["world"],
+                    result["counts"]["objectives"],
+                    result["counts"]["milestones"],
+                    result["counts"]["tasks"],
+                    result["counts"]["gates"]
                 );
             }
         }
@@ -465,6 +515,53 @@ fn main() -> Result<()> {
                 );
             }
         }
+        Command::Inspect {
+            path,
+            json,
+            markdown,
+            output,
+            include_hidden,
+            max_file_bytes,
+            fail_on_diagnostics,
+        } => {
+            if json && markdown {
+                anyhow::bail!("choose either --json or --markdown, not both");
+            }
+            let options = InspectOptions {
+                recursive: true,
+                include_hidden,
+                follow_symlinks: false,
+                max_file_bytes: max_file_bytes.or(Some(4 * 1024 * 1024)),
+            };
+            let report = inspect_path(&path, options)?;
+            let rendered = if json {
+                format!("{}\n", serde_json::to_string_pretty(&report)?)
+            } else if markdown {
+                render_markdown(&report)
+            } else {
+                format!(
+                    "INSPECT sources={} inspected={} verified={} mapped={} diagnostics={} declarations={} references={}\n",
+                    report.summary.source_file_count,
+                    report.summary.inspected_file_count,
+                    report.summary.verified_file_count,
+                    report.summary.mapped_file_count,
+                    report.summary.diagnostic_count,
+                    report.summary.declaration_count,
+                    report.summary.reference_count
+                )
+            };
+            if let Some(output) = output {
+                write_text(&output, &rendered)?;
+            } else {
+                print!("{rendered}");
+            }
+            if fail_on_diagnostics && report.summary.error_count > 0 {
+                anyhow::bail!(
+                    "workspace inspection found {} blocking diagnostic(s)",
+                    report.summary.error_count
+                );
+            }
+        }
         Command::Doctor { json } => {
             let report = doctor_report();
             if json {
@@ -497,6 +594,60 @@ fn parse_graphics_modes(input: &str) -> Result<Vec<RenderMode>> {
         .collect()
 }
 
+fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::VerificationReport) -> Value {
+    let mut tasks_by_state: BTreeMap<String, usize> = BTreeMap::new();
+    let mut tasks_by_milestone: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut gates_by_task: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for task in &cert.tasks {
+        *tasks_by_state.entry(task.state.clone()).or_default() += 1;
+        tasks_by_milestone
+            .entry(task.milestone.clone())
+            .or_default()
+            .push(task.name.as_str());
+    }
+    for gate in &cert.gates {
+        gates_by_task
+            .entry(gate.task.clone())
+            .or_default()
+            .push(gate.name.as_str());
+    }
+    let dependency_edges = cert
+        .tasks
+        .iter()
+        .flat_map(|task| {
+            task.requires.iter().map(move |dependency| {
+                json!({
+                    "from": dependency,
+                    "to": task.name,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "world": cert.world,
+        "counts": {
+            "objectives": cert.objectives.len(),
+            "milestones": cert.milestones.len(),
+            "tasks": cert.tasks.len(),
+            "gates": cert.gates.len(),
+            "decisions": cert.decisions.len(),
+            "notes": cert.notes.len(),
+        },
+        "objectives": cert.objectives,
+        "milestones": cert.milestones,
+        "tasks": cert.tasks,
+        "gates": cert.gates,
+        "decisions": cert.decisions,
+        "notes": cert.notes,
+        "tasks_by_state": tasks_by_state,
+        "tasks_by_milestone": tasks_by_milestone,
+        "gates_by_task": gates_by_task,
+        "dependency_edges": dependency_edges,
+        "checked_rows": report.checked_rows,
+    })
+}
+
 fn doctor_report() -> Value {
     let workspace = std::env::current_dir()
         .ok()
@@ -524,6 +675,9 @@ fn doctor_report() -> Value {
             "verify_artifact": "entc verify-artifact path/to/model.ent --json",
             "bind_python": "entc bind path/to/model.ent --target python --framework pytorch_fx --output build/ent_contract.py",
             "verify_witness": "entc verify-witness path/to/model.ent artifacts/run.witness.json --json",
+            "inspect": "entc inspect path/to/workspace --markdown --output build/workspace-map.md",
+            "plan": "entc plan path/to/work.ent --json",
+            "apply_dry_run": "entc apply path/to/work.ent --repo . --dry-run --json",
         },
         "editor": {
             "vscode_extension": format!("{workspace}/tooling/vscode/entanglement"),
@@ -908,6 +1062,14 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     }
     let json = serde_json::to_string_pretty(value)?;
     fs::write(path, format!("{json}\n"))?;
+    Ok(())
+}
+
+fn write_text(path: &Path, text: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, text)?;
     Ok(())
 }
 

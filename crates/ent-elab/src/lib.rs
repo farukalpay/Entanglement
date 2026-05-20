@@ -1,12 +1,13 @@
 use ent_core::{
     AbiContract, AcceleratorContract, AdContract, ArtifactContract, BackendContract,
-    BenchmarkContract, CanonicalContract, Certificate, DatasetContract, Endianness,
-    ExecutorContract, ExternalContract, GraphicContract, InstructionContract, InvariantContract,
-    KernelFormula, Label, LoweringContract, MachineContract, MachineMemoryModel, MemoryContract,
-    MemoryPermission, MemoryRegion, ModelContract, ParserContract, ProbabilityContract,
-    ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
+    BenchmarkContract, CanonicalContract, Certificate, DatasetContract, DecisionContract,
+    Endianness, ExecutorContract, ExternalContract, GateContract, GraphicContract,
+    InstructionContract, InvariantContract, KernelFormula, Label, LoweringContract,
+    MachineContract, MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion,
+    MilestoneContract, ModelContract, NoteContract, ObjectiveContract, ParserContract,
+    ProbabilityContract, ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
     RenderPipelineContract, RenderTargetContract, ResourceAccess, ResourceContract,
-    SelectionContract, StateId, TensorContract, TextReplacement, TrainingContract,
+    SelectionContract, StateId, TaskContract, TensorContract, TextReplacement, TrainingContract,
     TransformContract, TransformTarget, ValidatorContract, WitnessContract, WorkspaceContract,
     CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
 };
@@ -165,6 +166,12 @@ pub fn elaborate_ast(ast: &WorldAst) -> Result<Certificate, ElabError> {
         selections: explicit_selections(ast)?,
         transforms: explicit_transforms(ast)?,
         validators: explicit_validators(ast)?,
+        objectives: explicit_objectives(ast)?,
+        milestones: explicit_milestones(ast)?,
+        tasks: explicit_tasks(ast)?,
+        gates: explicit_gates(ast)?,
+        decisions: explicit_decisions(ast)?,
+        notes: explicit_notes(ast)?,
         graphics: explicit_graphics(ast)?,
         render_targets: explicit_render_targets(ast)?,
         render_pipelines: explicit_render_pipelines(ast)?,
@@ -346,6 +353,106 @@ fn explicit_validators(ast: &WorldAst) -> Result<Vec<ValidatorContract>, ElabErr
             Ok(ValidatorContract {
                 name: decl.name.clone(),
                 argv: decl.argv.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_objectives(ast: &WorldAst) -> Result<Vec<ObjectiveContract>, ElabError> {
+    ast.objectives
+        .iter()
+        .map(|decl| {
+            require_evidence("objective", &decl.name, &decl.evidence)?;
+            Ok(ObjectiveContract {
+                name: decl.name.clone(),
+                summary: decl.summary.clone(),
+                priority: decl.priority.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_milestones(ast: &WorldAst) -> Result<Vec<MilestoneContract>, ElabError> {
+    ast.milestones
+        .iter()
+        .map(|decl| {
+            require_evidence("milestone", &decl.name, &decl.evidence)?;
+            Ok(MilestoneContract {
+                name: decl.name.clone(),
+                objective: decl.objective.clone(),
+                state: decl.state.clone(),
+                due: decl.due.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_tasks(ast: &WorldAst) -> Result<Vec<TaskContract>, ElabError> {
+    ast.tasks
+        .iter()
+        .map(|decl| {
+            require_evidence("task", &decl.name, &decl.evidence)?;
+            Ok(TaskContract {
+                name: decl.name.clone(),
+                milestone: decl.milestone.clone(),
+                title: decl.title.clone(),
+                kind: decl.kind.clone(),
+                state: decl.state.clone(),
+                owner: decl.owner.clone(),
+                requires: decl.requires.clone(),
+                outputs: decl.outputs.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_gates(ast: &WorldAst) -> Result<Vec<GateContract>, ElabError> {
+    ast.gates
+        .iter()
+        .map(|decl| {
+            require_evidence("gate", &decl.name, &decl.evidence)?;
+            Ok(GateContract {
+                name: decl.name.clone(),
+                task: decl.task.clone(),
+                check: decl.check.clone(),
+                expect: decl.expect.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_decisions(ast: &WorldAst) -> Result<Vec<DecisionContract>, ElabError> {
+    ast.decisions
+        .iter()
+        .map(|decl| {
+            require_evidence("decision", &decl.name, &decl.evidence)?;
+            Ok(DecisionContract {
+                name: decl.name.clone(),
+                scope: decl.scope.clone(),
+                choice: decl.choice.clone(),
+                rationale: decl.rationale.clone(),
+                alternatives: decl.alternatives.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_notes(ast: &WorldAst) -> Result<Vec<NoteContract>, ElabError> {
+    ast.notes
+        .iter()
+        .map(|decl| {
+            require_evidence("note", &decl.name, &decl.evidence)?;
+            Ok(NoteContract {
+                name: decl.name.clone(),
+                scope: decl.scope.clone(),
+                text: decl.text.clone(),
+                tags: decl.tags.clone(),
                 evidence: decl.evidence.clone(),
             })
         })

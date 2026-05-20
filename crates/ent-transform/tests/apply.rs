@@ -1,5 +1,7 @@
 use ent_elab::elaborate_source;
-use ent_transform::{apply_certificate, TransformError};
+use ent_transform::{
+    apply_certificate, apply_certificate_with_options, ApplyOptions, TransformError,
+};
 use std::fs;
 use std::process::Command;
 
@@ -202,11 +204,31 @@ fn explicit_lexical_adapters_remove_comments_without_inferred_language_rules() {
         "set(VALUE \"# keep cmake string\") # drop cmake\n",
     )
     .expect("cmake");
+    fs::write(
+        repo.path().join("settings.ini"),
+        "path=\"#keep\"\n; drop semicolon\nvalue=1 # drop hash\n",
+    )
+    .expect("ini");
+    fs::write(
+        repo.path().join("build.bat"),
+        "@echo off\nREM drop rem\n  :: drop label comment\necho keep REM text\n",
+    )
+    .expect("bat");
+    fs::write(
+        repo.path().join("doc.xml"),
+        "<Project Url=\"https://example.test/a//b\">\n  <!-- drop xml -->\n</Project>\n",
+    )
+    .expect("xml");
+    fs::write(
+        repo.path().join("broken.js"),
+        b"let value = 1; // non-utf8 \xff\n",
+    )
+    .expect("broken js");
 
     let cert = elaborate_source(LEXICAL_PROGRAM).expect("program elaborates");
     let report = apply_certificate(&cert, repo.path()).expect("apply succeeds");
 
-    assert_eq!(report.changed_files.len(), 2);
+    assert_eq!(report.changed_files.len(), 5);
     let python = fs::read_to_string(repo.path().join("scripts/tool.py")).expect("python");
     assert!(python.starts_with("#!/usr/bin/env python3"));
     assert!(python.contains("\"# keep string\""));
@@ -215,6 +237,50 @@ fn explicit_lexical_adapters_remove_comments_without_inferred_language_rules() {
     let cmake = fs::read_to_string(repo.path().join("CMakeLists.txt")).expect("cmake");
     assert!(cmake.contains("\"# keep cmake string\""));
     assert!(!cmake.contains("drop cmake"));
+    let ini = fs::read_to_string(repo.path().join("settings.ini")).expect("ini");
+    assert!(ini.contains("\"#keep\""));
+    assert!(!ini.contains("drop semicolon"));
+    assert!(!ini.contains("drop hash"));
+    let batch = fs::read_to_string(repo.path().join("build.bat")).expect("bat");
+    assert!(!batch.contains("drop rem"));
+    assert!(!batch.contains("drop label"));
+    assert!(batch.contains("echo keep REM text"));
+    let xml = fs::read_to_string(repo.path().join("doc.xml")).expect("xml");
+    assert!(xml.contains("https://example.test/a//b"));
+    assert!(!xml.contains("drop xml"));
+    assert_eq!(
+        fs::read(repo.path().join("broken.js")).expect("broken js"),
+        b"let value = 1; // non-utf8 \xff\n"
+    );
+}
+
+#[test]
+fn selection_replacements_and_path_renames_cover_tree() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::create_dir_all(repo.path().join("OldNameDir")).expect("dir");
+    fs::write(
+        repo.path().join("OldNameDir/LegacyRuntimeTool.txt"),
+        "Old Name\nOldName\nLegacyRuntime\n",
+    )
+    .expect("text");
+    fs::write(
+        repo.path().join("binary-LegacyRuntime.bin"),
+        b"LegacyRuntime\xff",
+    )
+    .expect("binary");
+
+    let cert = elaborate_source(TREE_REWRITE_PROGRAM).expect("program elaborates");
+    let report = apply_certificate(&cert, repo.path()).expect("apply succeeds");
+
+    assert!(report
+        .changed_files
+        .iter()
+        .any(|change| change.path == "TargetEngineDir/TargetEngineTool.txt"));
+    assert!(!repo.path().join("OldNameDir").exists());
+    let renamed = fs::read_to_string(repo.path().join("TargetEngineDir/TargetEngineTool.txt"))
+        .expect("renamed");
+    assert_eq!(renamed, "TargetEngine\nTargetEngine\nTargetEngine\n");
+    assert!(repo.path().join("binary-TargetEngine.bin").exists());
 }
 
 #[test]
@@ -249,6 +315,39 @@ fn flatten_files_copies_selected_files_to_one_folder_without_deleting_sources() 
 }
 
 #[test]
+fn replacement_and_path_rename_apply_to_selected_file_batches() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::create_dir_all(repo.path().join("OldNameModule")).expect("module");
+    fs::write(
+        repo.path().join("OldNameModule/OldNameThing.cpp"),
+        "class OldNameThing { const char* Name = \"old name runtime\"; };\n",
+    )
+    .expect("cpp");
+    fs::write(
+        repo.path().join("README.md"),
+        "OldName and old name should both move.\n",
+    )
+    .expect("readme");
+
+    let cert = elaborate_source(TREE_REWRITE_PROGRAM).expect("program elaborates");
+    let report = apply_certificate(&cert, repo.path()).expect("apply succeeds");
+
+    assert!(report
+        .changed_files
+        .iter()
+        .any(|change| { change.path == "TargetEngineModule/TargetEngineThing.cpp" }));
+    assert!(!repo.path().join("OldNameModule/OldNameThing.cpp").exists());
+    let cpp = fs::read_to_string(repo.path().join("TargetEngineModule/TargetEngineThing.cpp"))
+        .expect("renamed cpp");
+    assert!(cpp.contains("TargetEngineThing"));
+    assert!(cpp.contains("\"TargetEngine\""));
+    assert!(!cpp.contains("OldName"));
+    assert!(!cpp.contains("old name"));
+    let readme = fs::read_to_string(repo.path().join("README.md")).expect("readme");
+    assert_eq!(readme, "TargetEngine and TargetEngine should both move.\n");
+}
+
+#[test]
 fn validator_failure_rolls_back_target_writes() {
     let repo = tempfile::tempdir().expect("repo");
     fs::write(repo.path().join("README.md"), "keep\nlegacy\n").expect("readme");
@@ -259,6 +358,26 @@ fn validator_failure_rolls_back_target_writes() {
     assert_eq!(
         fs::read_to_string(repo.path().join("README.md")).expect("readme"),
         "keep\nlegacy\n"
+    );
+}
+
+#[test]
+fn dry_run_reports_changes_without_writing_targets() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::write(repo.path().join("README.md"), "old\nlegacy\nkeep\n").expect("readme");
+    let cert = elaborate_source(MARKDOWN_PROGRAM).expect("program elaborates");
+
+    let report = apply_certificate_with_options(&cert, repo.path(), ApplyOptions { dry_run: true })
+        .expect("dry run succeeds");
+
+    assert!(report.dry_run);
+    assert!(report
+        .changed_files
+        .iter()
+        .any(|change| change.path == "README.md"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("README.md")).expect("readme"),
+        "old\nlegacy\nkeep\n"
     );
 }
 
@@ -454,10 +573,18 @@ world LexicalCleanup(agent Operator) {
   workspace repo uses filesystem write evidence repo_boundary
   parser py language ext:py via line-hash-shebang evidence py_comment_contract
   parser cmake_lists language name:CMakeLists.txt via line-hash evidence cmake_comment_contract
-  select scripts = files where parsed_by(py, cmake_lists) evidence explicit_parser_scope
+  parser ini language ext:ini via line-hash-semicolon evidence ini_comment_contract
+  parser bat language ext:bat via batch-comments evidence batch_comment_contract
+  parser js language ext:js via slash-comments evidence js_comment_contract
+  parser xml language ext:xml via html-comments evidence xml_comment_contract
+  select scripts = files where parsed_by(py, cmake_lists, ini, bat, js, xml) evidence explicit_parser_scope
   transform strip_comments remove_comments on scripts evidence lexical_comment_ranges
   theorem py_parser : parser_admissible(py)
   theorem cmake_parser : parser_admissible(cmake_lists)
+  theorem ini_parser : parser_admissible(ini)
+  theorem bat_parser : parser_admissible(bat)
+  theorem js_parser : parser_admissible(js)
+  theorem xml_parser : parser_admissible(xml)
   theorem scripts_selection : selection_admissible(scripts)
   theorem comments_safe : transform_admissible(strip_comments)
   proof py_parser {
@@ -470,6 +597,26 @@ world LexicalCleanup(agent Operator) {
     let fact = rule parser_admissible_from_parser(row)
     qed fact
   }
+  proof ini_parser {
+    let row = row parser ini
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof bat_parser {
+    let row = row parser bat
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof js_parser {
+    let row = row parser js
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof xml_parser {
+    let row = row parser xml
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
   proof scripts_selection {
     let row = row selection scripts
     let fact = rule selection_admissible_from_selection(row)
@@ -477,6 +624,69 @@ world LexicalCleanup(agent Operator) {
   }
   proof comments_safe {
     let row = row transform strip_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}
+"#;
+
+const TREE_REWRITE_PROGRAM: &str = r#"
+world TreeRewrite(agent Operator) {
+  state tree : Resource
+  workspace repo uses filesystem write evidence repo_boundary
+  select all = files where all_files() evidence all_file_scope
+  transform replace_lower_phrase replace_text on all from "old name runtime" to "TargetEngine" evidence lower_phrase_replace
+  transform replace_lower_name replace_text on all from "old name" to "TargetEngine" evidence lower_name_replace
+  transform replace_phrase replace_text on all from "Old Name" to "TargetEngine" evidence phrase_replace
+  transform replace_joined replace_text on all from "OldName" to "TargetEngine" evidence joined_replace
+  transform replace_legacy replace_text on all from "LegacyRuntime" to "TargetEngine" evidence legacy_replace
+  transform rename_name rename_paths on all from "OldName" to "TargetEngine" evidence name_path_replace
+  transform rename_legacy rename_paths on all from "LegacyRuntime" to "TargetEngine" evidence legacy_path_replace
+  theorem all_selection : selection_admissible(all)
+  theorem replace_lower_phrase_safe : transform_admissible(replace_lower_phrase)
+  theorem replace_lower_name_safe : transform_admissible(replace_lower_name)
+  theorem replace_phrase_safe : transform_admissible(replace_phrase)
+  theorem replace_joined_safe : transform_admissible(replace_joined)
+  theorem replace_legacy_safe : transform_admissible(replace_legacy)
+  theorem rename_name_safe : transform_admissible(rename_name)
+  theorem rename_legacy_safe : transform_admissible(rename_legacy)
+  proof all_selection {
+    let row = row selection all
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof replace_lower_phrase_safe {
+    let row = row transform replace_lower_phrase
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_lower_name_safe {
+    let row = row transform replace_lower_name
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_phrase_safe {
+    let row = row transform replace_phrase
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_joined_safe {
+    let row = row transform replace_joined
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof replace_legacy_safe {
+    let row = row transform replace_legacy
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof rename_name_safe {
+    let row = row transform rename_name
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof rename_legacy_safe {
+    let row = row transform rename_legacy
     let fact = rule transform_admissible_from_transform(row)
     qed fact
   }

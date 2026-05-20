@@ -35,6 +35,12 @@ pub struct WorldAst {
     pub selections: Vec<SelectionDecl>,
     pub transforms: Vec<TransformDecl>,
     pub validators: Vec<ValidatorDecl>,
+    pub objectives: Vec<ObjectiveDecl>,
+    pub milestones: Vec<MilestoneDecl>,
+    pub tasks: Vec<TaskDecl>,
+    pub gates: Vec<GateDecl>,
+    pub decisions: Vec<DecisionDecl>,
+    pub notes: Vec<NoteDecl>,
     pub graphics: Vec<GraphicsDecl>,
     pub render_targets: Vec<RenderTargetDecl>,
     pub render_pipelines: Vec<RenderPipelineDecl>,
@@ -244,6 +250,70 @@ pub struct TransformDecl {
 pub struct ValidatorDecl {
     pub name: String,
     pub argv: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObjectiveDecl {
+    pub name: String,
+    pub summary: String,
+    pub priority: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MilestoneDecl {
+    pub name: String,
+    pub objective: String,
+    pub state: String,
+    pub due: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskDecl {
+    pub name: String,
+    pub milestone: String,
+    pub title: String,
+    pub kind: String,
+    pub state: String,
+    pub owner: String,
+    pub requires: Vec<String>,
+    pub outputs: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GateDecl {
+    pub name: String,
+    pub task: String,
+    pub check: String,
+    pub expect: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecisionDecl {
+    pub name: String,
+    pub scope: String,
+    pub choice: String,
+    pub rationale: String,
+    pub alternatives: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteDecl {
+    pub name: String,
+    pub scope: String,
+    pub text: String,
+    pub tags: Vec<String>,
     pub evidence: String,
     pub span: SourceSpan,
 }
@@ -565,6 +635,12 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        objectives: vec![],
+        milestones: vec![],
+        tasks: vec![],
+        gates: vec![],
+        decisions: vec![],
+        notes: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],
@@ -642,6 +718,24 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         } else if let Some(rest) = line.strip_prefix("validator ") {
             ast.validators
                 .push(parse_validator(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("objective ") {
+            ast.objectives
+                .push(parse_objective(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("milestone ") {
+            ast.milestones
+                .push(parse_milestone(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("task ") {
+            ast.tasks
+                .push(parse_task(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("gate ") {
+            ast.gates
+                .push(parse_gate(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("decision ") {
+            ast.decisions
+                .push(parse_decision(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("note ") {
+            ast.notes
+                .push(parse_note(rest, span).map_err(|error| diagnostic(error, span, line))?);
         } else if let Some(rest) = line.strip_prefix("graphics ") {
             let (graphics, consumed) = parse_graphics_block(rest, span, &mut lines)
                 .map_err(|error| diagnostic(error, span, line))?;
@@ -1347,6 +1441,234 @@ fn parse_validator(rest: &str, span: SourceSpan) -> Result<ValidatorDecl, ParseE
         name: name.to_owned(),
         argv: parse_argv(argv.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
         evidence: evidence.to_owned(),
+        span,
+    })
+}
+
+fn parse_objective(rest: &str, span: SourceSpan) -> Result<ObjectiveDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, summary) = split_quoted_tail(head, " summary ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "priority", rest)?;
+    let priority = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || priority.is_empty()
+        || summary.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(ObjectiveDecl {
+        name: name.to_owned(),
+        summary,
+        priority: priority.to_owned(),
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_milestone(rest: &str, span: SourceSpan) -> Result<MilestoneDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, due) = split_quoted_tail(head, " due ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "objective", rest)?;
+    let objective = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "state", rest)?;
+    let state = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || objective.is_empty()
+        || state.is_empty()
+        || due.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(MilestoneDecl {
+        name: name.to_owned(),
+        objective: objective.to_owned(),
+        state: state.to_owned(),
+        due,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_task(rest: &str, span: SourceSpan) -> Result<TaskDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, title) = split_quoted_tail(head, " title ")?;
+    let (head, outputs) = head
+        .rsplit_once(" outputs ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "milestone", rest)?;
+    let milestone = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "kind", rest)?;
+    let kind = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "state", rest)?;
+    let state = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "owner", rest)?;
+    let owner = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "requires", rest)?;
+    let requires = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || milestone.is_empty()
+        || kind.is_empty()
+        || state.is_empty()
+        || owner.is_empty()
+        || title.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(TaskDecl {
+        name: name.to_owned(),
+        milestone: milestone.to_owned(),
+        title,
+        kind: kind.to_owned(),
+        state: state.to_owned(),
+        owner: owner.to_owned(),
+        requires: parse_name_list(requires).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        outputs: parse_argv(outputs.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_gate(rest: &str, span: SourceSpan) -> Result<GateDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, expect) = split_quoted_tail(head, " expect ")?;
+    let (head, check) = split_quoted_tail(head, " check ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "task", rest)?;
+    let task = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || task.is_empty()
+        || check.trim().is_empty()
+        || expect.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(GateDecl {
+        name: name.to_owned(),
+        task: task.to_owned(),
+        check,
+        expect,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_decision(rest: &str, span: SourceSpan) -> Result<DecisionDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, alternatives) = head
+        .rsplit_once(" alternatives ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, rationale) = split_quoted_tail(head, " because ")?;
+    let (head, choice) = split_quoted_tail(head, " choose ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "scope", rest)?;
+    let scope = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || scope.is_empty()
+        || choice.trim().is_empty()
+        || rationale.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(DecisionDecl {
+        name: name.to_owned(),
+        scope: scope.to_owned(),
+        choice,
+        rationale,
+        alternatives: parse_argv(alternatives.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_note(rest: &str, span: SourceSpan) -> Result<NoteDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, tags) = head
+        .rsplit_once(" tags ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, text) = split_quoted_tail(head, " text ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "scope", rest)?;
+    let scope = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || scope.is_empty()
+        || text.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(NoteDecl {
+        name: name.to_owned(),
+        scope: scope.to_owned(),
+        text,
+        tags: parse_name_list(tags.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
         span,
     })
 }

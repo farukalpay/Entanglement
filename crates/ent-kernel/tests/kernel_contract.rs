@@ -1,9 +1,10 @@
 use ent_core::{
-    AbiContract, AdContract, BackendContract, BenchmarkContract, Certificate, Endianness,
-    GraphicContract, InstabilityKind, InstructionContract, KernelFormula, Label, MachineContract,
-    MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion, ParserContract,
-    ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
-    RenderPipelineContract, RenderTargetContract, ResourceAccess, SelectionContract, StateId,
+    AbiContract, AdContract, BackendContract, BenchmarkContract, Certificate, DecisionContract,
+    Endianness, GateContract, GraphicContract, InstabilityKind, InstructionContract, KernelFormula,
+    Label, MachineContract, MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion,
+    MilestoneContract, NoteContract, ObjectiveContract, ParserContract, ProgramState,
+    ProofArtifact, ProofCertificate, ProverKind, RelationTable, RenderPipelineContract,
+    RenderTargetContract, ResourceAccess, SelectionContract, StateId, TaskContract,
     TransformContract, TransformTarget, ValidatorContract, WorkspaceContract,
     CERTIFICATE_SCHEMA_VERSION,
 };
@@ -60,6 +61,12 @@ fn accepting_certificate() -> Certificate {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        objectives: vec![],
+        milestones: vec![],
+        tasks: vec![],
+        gates: vec![],
+        decisions: vec![],
+        notes: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],
@@ -335,6 +342,119 @@ fn accepts_proved_workspace_transform_contracts() {
     assert_eq!(report.checked_rows.transforms, 1);
     assert_eq!(report.checked_rows.validators, 1);
     assert_eq!(report.checked_rows.proofs, 4);
+}
+
+#[test]
+fn accepts_proved_protocol_contracts() {
+    let mut cert = accepting_certificate();
+    cert.validators.push(ValidatorContract {
+        name: "cargo_test".into(),
+        argv: vec!["cargo".into(), "test".into()],
+        evidence: "validator_record".into(),
+    });
+    cert.objectives.push(ObjectiveContract {
+        name: "workspace_upgrade".into(),
+        summary: "Make checked workspace changes easier to stage and review".into(),
+        priority: "critical".into(),
+        evidence: "roadmap_record".into(),
+    });
+    cert.milestones.push(MilestoneContract {
+        name: "reviewable_changes".into(),
+        objective: "workspace_upgrade".into(),
+        state: "active".into(),
+        due: "2026-06-01".into(),
+        evidence: "schedule_record".into(),
+    });
+    cert.tasks.push(TaskContract {
+        name: "dry_run_report".into(),
+        milestone: "reviewable_changes".into(),
+        title: "Report changes before writing them".into(),
+        kind: "implement".into(),
+        state: "ready".into(),
+        owner: "maintainer".into(),
+        requires: vec![],
+        outputs: vec!["apply-report".into()],
+        evidence: "task_record".into(),
+    });
+    cert.gates.push(GateContract {
+        name: "dry_run_checks".into(),
+        task: "dry_run_report".into(),
+        check: "validator:cargo_test".into(),
+        expect: "pass".into(),
+        evidence: "gate_record".into(),
+    });
+    cert.decisions.push(DecisionContract {
+        name: "report_shape".into(),
+        scope: "task:dry_run_report".into(),
+        choice: "reuse apply report".into(),
+        rationale: "one report shape keeps review and write paths comparable".into(),
+        alternatives: vec!["separate summary".into()],
+        evidence: "decision_record".into(),
+    });
+    cert.notes.push(NoteContract {
+        name: "operator_note".into(),
+        scope: "gate:dry_run_checks".into(),
+        text: "Validators run against the staged tree before writes are materialized".into(),
+        tags: vec!["workspace".into(), "review".into()],
+        evidence: "note_record".into(),
+    });
+    cert.proofs.push(proof(
+        "validator_safe",
+        PropositionKind::ValidatorAdmissible,
+        "cargo_test",
+        RowKind::Validator,
+        PrimitiveRule::ValidatorAdmissibleFromValidator,
+    ));
+    cert.proofs.push(proof(
+        "objective_safe",
+        PropositionKind::ObjectiveAdmissible,
+        "workspace_upgrade",
+        RowKind::Objective,
+        PrimitiveRule::ObjectiveAdmissibleFromObjective,
+    ));
+    cert.proofs.push(proof(
+        "milestone_safe",
+        PropositionKind::MilestoneAdmissible,
+        "reviewable_changes",
+        RowKind::Milestone,
+        PrimitiveRule::MilestoneAdmissibleFromMilestone,
+    ));
+    cert.proofs.push(proof(
+        "task_safe",
+        PropositionKind::TaskAdmissible,
+        "dry_run_report",
+        RowKind::Task,
+        PrimitiveRule::TaskAdmissibleFromTask,
+    ));
+    cert.proofs.push(proof(
+        "gate_safe",
+        PropositionKind::GateAdmissible,
+        "dry_run_checks",
+        RowKind::Gate,
+        PrimitiveRule::GateAdmissibleFromGate,
+    ));
+    cert.proofs.push(proof(
+        "decision_safe",
+        PropositionKind::DecisionAdmissible,
+        "report_shape",
+        RowKind::Decision,
+        PrimitiveRule::DecisionAdmissibleFromDecision,
+    ));
+    cert.proofs.push(proof(
+        "note_safe",
+        PropositionKind::NoteAdmissible,
+        "operator_note",
+        RowKind::Note,
+        PrimitiveRule::NoteAdmissibleFromNote,
+    ));
+
+    let report = verify(&cert).expect("proved protocol rows should verify");
+    assert_eq!(report.checked_rows.objectives, 1);
+    assert_eq!(report.checked_rows.milestones, 1);
+    assert_eq!(report.checked_rows.tasks, 1);
+    assert_eq!(report.checked_rows.gates, 1);
+    assert_eq!(report.checked_rows.decisions, 1);
+    assert_eq!(report.checked_rows.notes, 1);
 }
 
 #[test]
@@ -690,6 +810,12 @@ fn rejects_public_restriction_that_deletes_required_factor_midpoint() {
         selections: vec![],
         transforms: vec![],
         validators: vec![],
+        objectives: vec![],
+        milestones: vec![],
+        tasks: vec![],
+        gates: vec![],
+        decisions: vec![],
+        notes: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],

@@ -76,6 +76,60 @@ fn accepts_matching_primitive_rule_script() {
 }
 
 #[test]
+fn accepts_protocol_primitive_rule_scripts() {
+    let rows = [
+        (
+            RowKind::Objective,
+            "workspace_upgrade",
+            PropositionKind::ObjectiveAdmissible,
+            PrimitiveRule::ObjectiveAdmissibleFromObjective,
+        ),
+        (
+            RowKind::Milestone,
+            "reviewable_changes",
+            PropositionKind::MilestoneAdmissible,
+            PrimitiveRule::MilestoneAdmissibleFromMilestone,
+        ),
+        (
+            RowKind::Task,
+            "dry_run_report",
+            PropositionKind::TaskAdmissible,
+            PrimitiveRule::TaskAdmissibleFromTask,
+        ),
+        (
+            RowKind::Gate,
+            "dry_run_checks",
+            PropositionKind::GateAdmissible,
+            PrimitiveRule::GateAdmissibleFromGate,
+        ),
+        (
+            RowKind::Decision,
+            "report_shape",
+            PropositionKind::DecisionAdmissible,
+            PrimitiveRule::DecisionAdmissibleFromDecision,
+        ),
+        (
+            RowKind::Note,
+            "review_note",
+            PropositionKind::NoteAdmissible,
+            PrimitiveRule::NoteAdmissibleFromNote,
+        ),
+    ];
+
+    for (row_kind, subject, proposition_kind, rule) in rows {
+        let env = Env::default().with(row_kind.clone(), subject);
+        let proposition = Proposition {
+            kind: proposition_kind,
+            subject: subject.into(),
+        };
+        let script = script("protocol_row", row_kind, subject, rule);
+
+        check_proof("protocol_row", &proposition, &script, &env)
+            .expect("protocol proof should check");
+    }
+}
+
+#[test]
 fn rejects_unknown_certificate_row() {
     let env = Env::default();
     let proposition = Proposition {

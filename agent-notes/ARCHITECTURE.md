@@ -2,7 +2,7 @@
 
 Entanglement is built as a language core with domain libraries around it. The
 compiler accepts explicit rows from `.ent` worlds, lowers them into certificate
-schema v7, and asks the kernel to check row shape plus matching proof scripts.
+schema v8, and asks the kernel to check row shape plus matching proof scripts.
 
 The current domain rows are:
 

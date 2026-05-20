@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 7;
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 8;
 pub const MIN_CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 pub const MAX_MODAL_DIMENSIONS: usize = 12;
 
@@ -256,6 +256,64 @@ pub struct TransformContract {
 pub struct ValidatorContract {
     pub name: String,
     pub argv: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectiveContract {
+    pub name: String,
+    pub summary: String,
+    pub priority: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MilestoneContract {
+    pub name: String,
+    pub objective: String,
+    pub state: String,
+    pub due: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskContract {
+    pub name: String,
+    pub milestone: String,
+    pub title: String,
+    pub kind: String,
+    pub state: String,
+    pub owner: String,
+    pub requires: Vec<String>,
+    pub outputs: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateContract {
+    pub name: String,
+    pub task: String,
+    pub check: String,
+    pub expect: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionContract {
+    pub name: String,
+    pub scope: String,
+    pub choice: String,
+    pub rationale: String,
+    pub alternatives: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteContract {
+    pub name: String,
+    pub scope: String,
+    pub text: String,
+    pub tags: Vec<String>,
     pub evidence: String,
 }
 
@@ -617,6 +675,18 @@ pub struct Certificate {
     #[serde(default)]
     pub validators: Vec<ValidatorContract>,
     #[serde(default)]
+    pub objectives: Vec<ObjectiveContract>,
+    #[serde(default)]
+    pub milestones: Vec<MilestoneContract>,
+    #[serde(default)]
+    pub tasks: Vec<TaskContract>,
+    #[serde(default)]
+    pub gates: Vec<GateContract>,
+    #[serde(default)]
+    pub decisions: Vec<DecisionContract>,
+    #[serde(default)]
+    pub notes: Vec<NoteContract>,
+    #[serde(default)]
     pub graphics: Vec<GraphicContract>,
     #[serde(default)]
     pub render_targets: Vec<RenderTargetContract>,
@@ -678,6 +748,12 @@ pub struct CheckedRows {
     pub selections: usize,
     pub transforms: usize,
     pub validators: usize,
+    pub objectives: usize,
+    pub milestones: usize,
+    pub tasks: usize,
+    pub gates: usize,
+    pub decisions: usize,
+    pub notes: usize,
     pub graphics: usize,
     pub render_targets: usize,
     pub render_pipelines: usize,
@@ -721,6 +797,12 @@ pub enum InstabilityKind {
     SelectionInadmissible,
     TransformInadmissible,
     ValidatorInadmissible,
+    ObjectiveInadmissible,
+    MilestoneInadmissible,
+    TaskInadmissible,
+    GateInadmissible,
+    DecisionInadmissible,
+    NoteInadmissible,
     GraphicsInadmissible,
     RenderTargetInadmissible,
     RenderPipelineInadmissible,

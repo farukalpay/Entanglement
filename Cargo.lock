@@ -224,6 +224,7 @@ dependencies = [
  "ent-core",
  "ent-elab",
  "ent-graphics",
+ "ent-inspect",
  "ent-kernel",
  "ent-native-gfx",
  "ent-opt",
@@ -271,6 +272,27 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "ent-inspect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ent-core",
+ "ent-elab",
+ "ent-kernel",
+ "ent-parser",
+ "ent-proof",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-c",
+ "tree-sitter-cpp",
+ "tree-sitter-rust",
 ]
 
 [[package]]

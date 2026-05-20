@@ -1,0 +1,140 @@
+world WorkspaceProtocol(role Maintainer, space Repository) {
+  state tree : Resource
+  workspace repo uses filesystem write evidence repo_boundary
+  parser rust language rust via tree-sitter evidence rust_parser_contract
+  document markdown via pulldown_cmark evidence markdown_contract
+  select rust_sources = files where parsed_by(rust) evidence rust_scope
+  select docs = files where parsed_by(markdown) evidence docs_scope
+  transform strip_rust_comments remove_comments on rust_sources evidence comment_ranges
+  transform archive_docs flatten_files on docs into "build/protocol-docs" evidence docs_archive
+  validator cargo_test argv ["cargo", "test"] evidence cargo_test_record
+
+  objective workspace_upgrade priority critical summary "Make repository changes reviewable before they are written" evidence roadmap_record
+  milestone previewable_changes objective workspace_upgrade state active due "2026-06-01" evidence schedule_record
+  milestone recorded_context objective workspace_upgrade state planned due "unscheduled" evidence context_schedule
+  task dry_run_report milestone previewable_changes kind implement state ready owner maintainer requires [] outputs ["apply-report"] title "Report staged file changes without touching the repository" evidence dry_run_task
+  task protocol_rows milestone recorded_context kind design state active owner maintainer requires [dry_run_report] outputs ["objective-row","task-row","gate-row"] title "Carry durable planning rows inside the certificate" evidence protocol_task
+  task command_surface milestone previewable_changes kind document state todo owner maintainer requires [protocol_rows] outputs ["plan-command","dry-run-flag"] title "Expose the checked plan through the command surface" evidence command_task
+  gate dry_run_validator task dry_run_report check "validator:cargo_test" expect "pass" evidence dry_run_gate
+  gate comment_transform task command_surface check "transform:strip_rust_comments" expect "changed" evidence transform_gate
+  decision report_shape scope task:dry_run_report choose "reuse apply report" because "one report shape keeps preview and write paths comparable" alternatives ["separate summary","raw patch only"] evidence report_shape_record
+  decision row_names scope objective:workspace_upgrade choose "objective milestone task gate decision note" because "the terms match project work and stay readable in review" alternatives ["ticket-only rows","freeform logs"] evidence row_name_record
+  note review_context scope gate:dry_run_validator text "Validators run against the staged tree before writes are materialized" tags [workspace,review] evidence review_note
+  note release_context scope milestone:previewable_changes text "The plan command summarizes rows without requiring repository mutation" tags [release,cli] evidence release_note
+
+  theorem rust_parser_safe : parser_admissible(rust)
+  theorem markdown_parser_safe : parser_admissible(markdown)
+  theorem rust_scope_safe : selection_admissible(rust_sources)
+  theorem docs_scope_safe : selection_admissible(docs)
+  theorem strip_safe : transform_admissible(strip_rust_comments)
+  theorem archive_safe : transform_admissible(archive_docs)
+  theorem cargo_gate_safe : validator_admissible(cargo_test)
+  theorem objective_safe : objective_admissible(workspace_upgrade)
+  theorem previewable_safe : milestone_admissible(previewable_changes)
+  theorem context_safe : milestone_admissible(recorded_context)
+  theorem dry_run_task_safe : task_admissible(dry_run_report)
+  theorem protocol_task_safe : task_admissible(protocol_rows)
+  theorem command_task_safe : task_admissible(command_surface)
+  theorem dry_run_gate_safe : gate_admissible(dry_run_validator)
+  theorem comment_gate_safe : gate_admissible(comment_transform)
+  theorem report_decision_safe : decision_admissible(report_shape)
+  theorem row_decision_safe : decision_admissible(row_names)
+  theorem review_note_safe : note_admissible(review_context)
+  theorem release_note_safe : note_admissible(release_context)
+
+  proof rust_parser_safe {
+    let row = row parser rust
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof markdown_parser_safe {
+    let row = row parser markdown
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof rust_scope_safe {
+    let row = row selection rust_sources
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof docs_scope_safe {
+    let row = row selection docs
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof strip_safe {
+    let row = row transform strip_rust_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof archive_safe {
+    let row = row transform archive_docs
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+  proof cargo_gate_safe {
+    let row = row validator cargo_test
+    let fact = rule validator_admissible_from_validator(row)
+    qed fact
+  }
+  proof objective_safe {
+    let row = row objective workspace_upgrade
+    let fact = rule objective_admissible_from_objective(row)
+    qed fact
+  }
+  proof previewable_safe {
+    let row = row milestone previewable_changes
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof context_safe {
+    let row = row milestone recorded_context
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof dry_run_task_safe {
+    let row = row task dry_run_report
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof protocol_task_safe {
+    let row = row task protocol_rows
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof command_task_safe {
+    let row = row task command_surface
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof dry_run_gate_safe {
+    let row = row gate dry_run_validator
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof comment_gate_safe {
+    let row = row gate comment_transform
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof report_decision_safe {
+    let row = row decision report_shape
+    let fact = rule decision_admissible_from_decision(row)
+    qed fact
+  }
+  proof row_decision_safe {
+    let row = row decision row_names
+    let fact = rule decision_admissible_from_decision(row)
+    qed fact
+  }
+  proof review_note_safe {
+    let row = row note review_context
+    let fact = rule note_admissible_from_note(row)
+    qed fact
+  }
+  proof release_note_safe {
+    let row = row note release_context
+    let fact = rule note_admissible_from_note(row)
+    qed fact
+  }
+}

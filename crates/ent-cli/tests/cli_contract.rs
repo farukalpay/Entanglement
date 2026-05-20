@@ -1,3 +1,4 @@
+use ent_core::CERTIFICATE_SCHEMA_VERSION;
 use std::fs;
 use std::process::Command;
 
@@ -142,7 +143,7 @@ world Simulation(agent A, space X) {
         &fs::read_to_string(bundle.join("manifest.json")).expect("manifest json"),
     )
     .expect("parse manifest json");
-    assert_eq!(manifest["schema_version"], 7);
+    assert_eq!(manifest["schema_version"], CERTIFICATE_SCHEMA_VERSION);
     assert_eq!(manifest["target"]["platform"], "apple-silicon-macos");
     assert!(manifest["source_hash"]
         .as_str()
@@ -177,8 +178,11 @@ world Simulation(agent A, space X) {
     let verify_json: serde_json::Value =
         serde_json::from_slice(&verify_bundle.stdout).expect("verify-bundle json");
     assert_eq!(verify_json["world"], "Simulation");
-    assert_eq!(verify_json["schema_version"], 7);
-    assert_eq!(verify_json["certificate_version"], 7);
+    assert_eq!(verify_json["schema_version"], CERTIFICATE_SCHEMA_VERSION);
+    assert_eq!(
+        verify_json["certificate_version"],
+        CERTIFICATE_SCHEMA_VERSION
+    );
     assert_eq!(verify_json["artifact_count"], 5);
     assert_eq!(verify_json["target"]["platform"], "apple-silicon-macos");
 }
@@ -720,6 +724,31 @@ world CliCleanup(agent Operator) {
     )
     .expect("source");
 
+    let dry_run = entc_command()
+        .args([
+            "apply",
+            source.to_str().unwrap(),
+            "--repo",
+            repo.to_str().unwrap(),
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .expect("run entc apply --dry-run");
+    assert!(
+        dry_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    let dry_run_report: serde_json::Value =
+        serde_json::from_slice(&dry_run.stdout).expect("apply --dry-run --json report");
+    assert_eq!(dry_run_report["dry_run"], true);
+    assert_eq!(dry_run_report["changed_files"][0]["path"], "README.md");
+    assert_eq!(
+        fs::read_to_string(repo.join("README.md")).unwrap(),
+        "keep\nremove legacy\n"
+    );
+
     let apply = entc_command()
         .args([
             "apply",
@@ -743,6 +772,141 @@ world CliCleanup(agent Operator) {
         fs::read_to_string(repo.join("README.md")).unwrap(),
         "keep\n"
     );
+}
+
+#[test]
+fn entc_plan_reports_protocol_rows() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("plan.ent");
+    fs::write(
+        &source,
+        r#"
+world PlanRows(role Maintainer, space Workspace) {
+  state tree : Resource
+  validator cargo_test argv ["cargo", "test"] evidence validator_record
+  objective workspace_upgrade priority critical summary "Make checked workspace changes easier to stage and review" evidence roadmap_record
+  milestone reviewable_changes objective workspace_upgrade state active due "2026-06-01" evidence schedule_record
+  task dry_run_report milestone reviewable_changes kind implement state ready owner maintainer requires [] outputs ["apply-report"] title "Report changes before writing them" evidence task_record
+  gate dry_run_checks task dry_run_report check "validator:cargo_test" expect "pass" evidence gate_record
+  decision report_shape scope task:dry_run_report choose "reuse apply report" because "one report shape keeps review and write paths comparable" alternatives ["separate summary"] evidence decision_record
+  note review_note scope gate:dry_run_checks text "Validators run against the staged tree before writes are materialized" tags [workspace,review] evidence note_record
+  theorem validator_safe : validator_admissible(cargo_test)
+  theorem objective_safe : objective_admissible(workspace_upgrade)
+  theorem milestone_safe : milestone_admissible(reviewable_changes)
+  theorem task_safe : task_admissible(dry_run_report)
+  theorem gate_safe : gate_admissible(dry_run_checks)
+  theorem decision_safe : decision_admissible(report_shape)
+  theorem note_safe : note_admissible(review_note)
+  proof validator_safe {
+    let row = row validator cargo_test
+    let fact = rule validator_admissible_from_validator(row)
+    qed fact
+  }
+  proof objective_safe {
+    let row = row objective workspace_upgrade
+    let fact = rule objective_admissible_from_objective(row)
+    qed fact
+  }
+  proof milestone_safe {
+    let row = row milestone reviewable_changes
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof task_safe {
+    let row = row task dry_run_report
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof gate_safe {
+    let row = row gate dry_run_checks
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof decision_safe {
+    let row = row decision report_shape
+    let fact = rule decision_admissible_from_decision(row)
+    qed fact
+  }
+  proof note_safe {
+    let row = row note review_note
+    let fact = rule note_admissible_from_note(row)
+    qed fact
+  }
+}
+"#,
+    )
+    .expect("source");
+
+    let plan = entc_command()
+        .args(["plan", source.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc plan");
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&plan.stdout).expect("plan --json report");
+    assert_eq!(report["world"], "PlanRows");
+    assert_eq!(report["counts"]["tasks"], 1);
+    assert_eq!(report["tasks_by_state"]["ready"], 1);
+    assert_eq!(
+        report["gates_by_task"]["dry_run_report"][0],
+        "dry_run_checks"
+    );
+    assert_eq!(report["checked_rows"]["gates"], 1);
+}
+
+#[test]
+fn entc_inspect_reports_workspace_map() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("inspectable.ent");
+    fs::write(
+        &source,
+        r#"
+world CliInspect(space Workspace) {
+  state tree : Resource
+}
+"#,
+    )
+    .expect("source");
+
+    let inspect = entc_command()
+        .args(["inspect", temp.path().to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc inspect");
+    assert!(
+        inspect.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&inspect.stdout).expect("inspect --json report");
+    assert_eq!(report["summary"]["source_file_count"], 1);
+    assert_eq!(report["summary"]["verified_file_count"], 1);
+    assert_eq!(report["declaration_counts"]["states"], 1);
+    assert_eq!(report["files"][0]["world"], "CliInspect");
+
+    let markdown = temp.path().join("inspect.md");
+    let render = entc_command()
+        .args([
+            "inspect",
+            temp.path().to_str().unwrap(),
+            "--markdown",
+            "--output",
+            markdown.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run entc inspect markdown");
+    assert!(
+        render.status.success(),
+        "{}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let markdown_text = fs::read_to_string(markdown).expect("markdown");
+    assert!(markdown_text.contains("Entanglement Inspection"));
+    assert!(markdown_text.contains("inspectable.ent"));
 }
 
 fn graph_hash(bundle: &std::path::Path) -> serde_json::Value {

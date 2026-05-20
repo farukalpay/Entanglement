@@ -1,0 +1,456 @@
+world CommentStrip(agent Operator) {
+  state tree : Resource
+
+  workspace repo uses filesystem write evidence comment_strip_boundary
+  parser py language ext:py via line-hash-shebang evidence py_lexical_contract
+  parser sh language ext:sh via line-hash-shebang evidence sh_lexical_contract
+  parser command language ext:command via line-hash-shebang evidence command_lexical_contract
+  parser bash language ext:bash via line-hash-shebang evidence bash_lexical_contract
+  parser zsh language ext:zsh via line-hash-shebang evidence zsh_lexical_contract
+  parser pl language ext:pl via line-hash-shebang evidence pl_lexical_contract
+  parser rb language ext:rb via line-hash-shebang evidence rb_lexical_contract
+  parser cmake language ext:cmake via line-hash evidence cmake_lexical_contract
+  parser cmakelists language name:CMakeLists.txt via line-hash evidence cmakelists_lexical_contract
+  parser mk language ext:mk via line-hash evidence mk_lexical_contract
+  parser makefile language name:Makefile via line-hash evidence makefile_lexical_contract
+  parser gitignore language name:.gitignore via line-hash evidence gitignore_lexical_contract
+  parser gitattributes language name:.gitattributes via line-hash evidence gitattributes_lexical_contract
+  parser editorconfig language name:.editorconfig via line-hash evidence editorconfig_lexical_contract
+  parser ini language ext:ini via line-hash-semicolon evidence ini_lexical_contract
+  parser bat language ext:bat via batch-comments evidence bat_lexical_contract
+  parser cmd language ext:cmd via batch-comments evidence cmd_lexical_contract
+  parser c_src language ext:c via slash-comments evidence c_src_lexical_contract
+  parser h_src language ext:h via slash-comments evidence h_src_lexical_contract
+  parser cc_src language ext:cc via slash-comments evidence cc_src_lexical_contract
+  parser cpp_src language ext:cpp via slash-comments evidence cpp_src_lexical_contract
+  parser cxx_src language ext:cxx via slash-comments evidence cxx_src_lexical_contract
+  parser hh_src language ext:hh via slash-comments evidence hh_src_lexical_contract
+  parser hpp_src language ext:hpp via slash-comments evidence hpp_src_lexical_contract
+  parser hxx_src language ext:hxx via slash-comments evidence hxx_src_lexical_contract
+  parser inl_src language ext:inl via slash-comments evidence inl_src_lexical_contract
+  parser objc_src language ext:m via slash-comments evidence objc_src_lexical_contract
+  parser objcxx_src language ext:mm via slash-comments evidence objcxx_src_lexical_contract
+  parser csharp_src language ext:cs via slash-comments evidence csharp_src_lexical_contract
+  parser java_src language ext:java via slash-comments evidence java_src_lexical_contract
+  parser js_src language ext:js via slash-comments evidence js_src_lexical_contract
+  parser ts_src language ext:ts via slash-comments evidence ts_src_lexical_contract
+  parser usf_src language ext:usf via slash-comments evidence usf_src_lexical_contract
+  parser ush_src language ext:ush via slash-comments evidence ush_src_lexical_contract
+  parser hlsl_src language ext:hlsl via slash-comments evidence hlsl_src_lexical_contract
+  parser glsl_src language ext:glsl via slash-comments evidence glsl_src_lexical_contract
+  parser rc_src language ext:rc via slash-comments evidence rc_src_lexical_contract
+  parser inc_src language ext:inc via slash-comments evidence inc_src_lexical_contract
+  parser css_src language ext:css via slash-star evidence css_src_lexical_contract
+  parser xml_doc language ext:xml via html-comments evidence xml_doc_lexical_contract
+  parser html_doc language ext:html via html-comments evidence html_doc_lexical_contract
+  parser html5_doc language ext:html5 via html-comments evidence html5_doc_lexical_contract
+  parser vcxproj_doc language ext:vcxproj via html-comments evidence vcxproj_doc_lexical_contract
+  parser filters_doc language ext:filters via html-comments evidence filters_doc_lexical_contract
+  parser csproj_doc language ext:csproj via html-comments evidence csproj_doc_lexical_contract
+  parser vcproj_doc language ext:vcproj via html-comments evidence vcproj_doc_lexical_contract
+  parser props_doc language ext:props via html-comments evidence props_doc_lexical_contract
+  parser targets_doc language ext:targets via html-comments evidence targets_doc_lexical_contract
+  parser vsprops_doc language ext:vsprops via html-comments evidence vsprops_doc_lexical_contract
+  parser resx_doc language ext:resx via html-comments evidence resx_doc_lexical_contract
+  parser xaml_doc language ext:xaml via html-comments evidence xaml_doc_lexical_contract
+  parser aspx_doc language ext:aspx via html-comments evidence aspx_doc_lexical_contract
+  parser snippet_doc language ext:snippet via html-comments evidence snippet_doc_lexical_contract
+  parser manifest_doc language ext:manifest via html-comments evidence manifest_doc_lexical_contract
+  parser config_doc language ext:config via html-comments evidence config_doc_lexical_contract
+  parser tps_doc language ext:tps via html-comments evidence tps_doc_lexical_contract
+  parser sql_src language ext:sql via line-double-dash evidence sql_src_lexical_contract
+  parser def_src language ext:def via line-semicolon evidence def_src_lexical_contract
+  parser sln_src language ext:sln via line-hash evidence sln_src_lexical_contract
+  parser dsp_src language ext:dsp via line-hash evidence dsp_src_lexical_contract
+  parser dsw_src language ext:dsw via line-hash evidence dsw_src_lexical_contract
+  parser xcconfig_src language ext:xcconfig via line-slash evidence xcconfig_src_lexical_contract
+
+  select commentable_code = files where parsed_by(py, sh, command, bash, zsh, pl, rb, cmake, cmakelists, mk, makefile, gitignore, gitattributes, editorconfig, ini, bat, cmd, c_src, h_src, cc_src, cpp_src, cxx_src, hh_src, hpp_src, hxx_src, inl_src, objc_src, objcxx_src, csharp_src, java_src, js_src, ts_src, usf_src, ush_src, hlsl_src, glsl_src, rc_src, inc_src, css_src, xml_doc, html_doc, html5_doc, vcxproj_doc, filters_doc, csproj_doc, vcproj_doc, props_doc, targets_doc, vsprops_doc, resx_doc, xaml_doc, aspx_doc, snippet_doc, manifest_doc, config_doc, tps_doc, sql_src, def_src, sln_src, dsp_src, dsw_src, xcconfig_src) evidence commentable_scope
+  transform strip_comments remove_comments on commentable_code evidence lexical_comment_ranges
+
+  theorem py_parser : parser_admissible(py)
+  theorem sh_parser : parser_admissible(sh)
+  theorem command_parser : parser_admissible(command)
+  theorem bash_parser : parser_admissible(bash)
+  theorem zsh_parser : parser_admissible(zsh)
+  theorem pl_parser : parser_admissible(pl)
+  theorem rb_parser : parser_admissible(rb)
+  theorem cmake_parser : parser_admissible(cmake)
+  theorem cmakelists_parser : parser_admissible(cmakelists)
+  theorem mk_parser : parser_admissible(mk)
+  theorem makefile_parser : parser_admissible(makefile)
+  theorem gitignore_parser : parser_admissible(gitignore)
+  theorem gitattributes_parser : parser_admissible(gitattributes)
+  theorem editorconfig_parser : parser_admissible(editorconfig)
+  theorem ini_parser : parser_admissible(ini)
+  theorem bat_parser : parser_admissible(bat)
+  theorem cmd_parser : parser_admissible(cmd)
+  theorem c_src_parser : parser_admissible(c_src)
+  theorem h_src_parser : parser_admissible(h_src)
+  theorem cc_src_parser : parser_admissible(cc_src)
+  theorem cpp_src_parser : parser_admissible(cpp_src)
+  theorem cxx_src_parser : parser_admissible(cxx_src)
+  theorem hh_src_parser : parser_admissible(hh_src)
+  theorem hpp_src_parser : parser_admissible(hpp_src)
+  theorem hxx_src_parser : parser_admissible(hxx_src)
+  theorem inl_src_parser : parser_admissible(inl_src)
+  theorem objc_src_parser : parser_admissible(objc_src)
+  theorem objcxx_src_parser : parser_admissible(objcxx_src)
+  theorem csharp_src_parser : parser_admissible(csharp_src)
+  theorem java_src_parser : parser_admissible(java_src)
+  theorem js_src_parser : parser_admissible(js_src)
+  theorem ts_src_parser : parser_admissible(ts_src)
+  theorem usf_src_parser : parser_admissible(usf_src)
+  theorem ush_src_parser : parser_admissible(ush_src)
+  theorem hlsl_src_parser : parser_admissible(hlsl_src)
+  theorem glsl_src_parser : parser_admissible(glsl_src)
+  theorem rc_src_parser : parser_admissible(rc_src)
+  theorem inc_src_parser : parser_admissible(inc_src)
+  theorem css_src_parser : parser_admissible(css_src)
+  theorem xml_doc_parser : parser_admissible(xml_doc)
+  theorem html_doc_parser : parser_admissible(html_doc)
+  theorem html5_doc_parser : parser_admissible(html5_doc)
+  theorem vcxproj_doc_parser : parser_admissible(vcxproj_doc)
+  theorem filters_doc_parser : parser_admissible(filters_doc)
+  theorem csproj_doc_parser : parser_admissible(csproj_doc)
+  theorem vcproj_doc_parser : parser_admissible(vcproj_doc)
+  theorem props_doc_parser : parser_admissible(props_doc)
+  theorem targets_doc_parser : parser_admissible(targets_doc)
+  theorem vsprops_doc_parser : parser_admissible(vsprops_doc)
+  theorem resx_doc_parser : parser_admissible(resx_doc)
+  theorem xaml_doc_parser : parser_admissible(xaml_doc)
+  theorem aspx_doc_parser : parser_admissible(aspx_doc)
+  theorem snippet_doc_parser : parser_admissible(snippet_doc)
+  theorem manifest_doc_parser : parser_admissible(manifest_doc)
+  theorem config_doc_parser : parser_admissible(config_doc)
+  theorem tps_doc_parser : parser_admissible(tps_doc)
+  theorem sql_src_parser : parser_admissible(sql_src)
+  theorem def_src_parser : parser_admissible(def_src)
+  theorem sln_src_parser : parser_admissible(sln_src)
+  theorem dsp_src_parser : parser_admissible(dsp_src)
+  theorem dsw_src_parser : parser_admissible(dsw_src)
+  theorem xcconfig_src_parser : parser_admissible(xcconfig_src)
+  theorem commentable_selection : selection_admissible(commentable_code)
+  theorem comments_safe : transform_admissible(strip_comments)
+
+  proof py_parser {
+    let row = row parser py
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof sh_parser {
+    let row = row parser sh
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof command_parser {
+    let row = row parser command
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof bash_parser {
+    let row = row parser bash
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof zsh_parser {
+    let row = row parser zsh
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof pl_parser {
+    let row = row parser pl
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof rb_parser {
+    let row = row parser rb
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmake_parser {
+    let row = row parser cmake
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmakelists_parser {
+    let row = row parser cmakelists
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof mk_parser {
+    let row = row parser mk
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof makefile_parser {
+    let row = row parser makefile
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof gitignore_parser {
+    let row = row parser gitignore
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof gitattributes_parser {
+    let row = row parser gitattributes
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof editorconfig_parser {
+    let row = row parser editorconfig
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof ini_parser {
+    let row = row parser ini
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof bat_parser {
+    let row = row parser bat
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cmd_parser {
+    let row = row parser cmd
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof c_src_parser {
+    let row = row parser c_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof h_src_parser {
+    let row = row parser h_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cc_src_parser {
+    let row = row parser cc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cpp_src_parser {
+    let row = row parser cpp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof cxx_src_parser {
+    let row = row parser cxx_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hh_src_parser {
+    let row = row parser hh_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hpp_src_parser {
+    let row = row parser hpp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hxx_src_parser {
+    let row = row parser hxx_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof inl_src_parser {
+    let row = row parser inl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof objc_src_parser {
+    let row = row parser objc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof objcxx_src_parser {
+    let row = row parser objcxx_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof csharp_src_parser {
+    let row = row parser csharp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof java_src_parser {
+    let row = row parser java_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof js_src_parser {
+    let row = row parser js_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof ts_src_parser {
+    let row = row parser ts_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof usf_src_parser {
+    let row = row parser usf_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof ush_src_parser {
+    let row = row parser ush_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof hlsl_src_parser {
+    let row = row parser hlsl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof glsl_src_parser {
+    let row = row parser glsl_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof rc_src_parser {
+    let row = row parser rc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof inc_src_parser {
+    let row = row parser inc_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof css_src_parser {
+    let row = row parser css_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof xml_doc_parser {
+    let row = row parser xml_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof html_doc_parser {
+    let row = row parser html_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof html5_doc_parser {
+    let row = row parser html5_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof vcxproj_doc_parser {
+    let row = row parser vcxproj_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof filters_doc_parser {
+    let row = row parser filters_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof csproj_doc_parser {
+    let row = row parser csproj_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof vcproj_doc_parser {
+    let row = row parser vcproj_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof props_doc_parser {
+    let row = row parser props_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof targets_doc_parser {
+    let row = row parser targets_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof vsprops_doc_parser {
+    let row = row parser vsprops_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof resx_doc_parser {
+    let row = row parser resx_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof xaml_doc_parser {
+    let row = row parser xaml_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof aspx_doc_parser {
+    let row = row parser aspx_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof snippet_doc_parser {
+    let row = row parser snippet_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof manifest_doc_parser {
+    let row = row parser manifest_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof config_doc_parser {
+    let row = row parser config_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof tps_doc_parser {
+    let row = row parser tps_doc
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof sql_src_parser {
+    let row = row parser sql_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof def_src_parser {
+    let row = row parser def_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof sln_src_parser {
+    let row = row parser sln_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof dsp_src_parser {
+    let row = row parser dsp_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof dsw_src_parser {
+    let row = row parser dsw_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof xcconfig_src_parser {
+    let row = row parser xcconfig_src
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof commentable_selection {
+    let row = row selection commentable_code
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof comments_safe {
+    let row = row transform strip_comments
+    let fact = rule transform_admissible_from_transform(row)
+    qed fact
+  }
+}

@@ -3,7 +3,8 @@
 Entanglement is a certificate-native `.ent` language for executable programs
 whose important semantic rows are visible to the compiler and checked by a small
 kernel. The current surface covers resources, effects, external capabilities,
-machine contracts, tensor training boundaries, and graphics workloads.
+workspace protocols, machine contracts, tensor training boundaries, and
+graphics workloads.
 
 The language is organized around three layers:
 
@@ -65,11 +66,24 @@ witness satisfaction consumes witness, training, artifact, and executor rows.
 
 ```bash
 entc check examples/capability-store.ent
+entc plan examples/workspace-protocol.ent --json
+entc inspect . --markdown --output build/workspace-map.md
+entc apply examples/repo-cleanup.ent --repo path/to/repo --dry-run --json
 entc emit-cert examples/tensor-xor.ent --output build/tensor-xor.cert.json
 entc build examples/cpu-audit.ent --target linux-cpu --output build/cpu-audit.entgraph
 entc build examples/cpu-audit.ent --target macos-cpu --output build/cpu-audit.entgraph
 entc verify-bundle build/cpu-audit.entgraph --json
 ```
+
+`examples/workspace-protocol.ent` adds checked objectives, milestones, tasks,
+gates, decisions, and notes to the same certificate path as workspace
+transforms. `entc plan` prints those rows as a reviewable report, while
+`entc apply --dry-run` stages transforms and validators without writing target
+files.
+
+`entc inspect` maps `.ent`, Rust, C, and C++ sources into one deterministic
+report: verified worlds, declaration counts, proof coverage, source symbols,
+include/use edges, call edges, diagnostics, and readiness signals.
 
 Graphics remains a library/runtime capability:
 
@@ -80,10 +94,11 @@ entc bench benchmarks/graphics --modes interpret,ir,native --warmup 1 --iteratio
 
 ## Architecture
 
-The compiler produces certificate schema v7. Tensor rows add shape, dtype,
-gradient, layout, dataset, model, accelerator, training, canonical, artifact,
-lowering, executor, and witness contracts to the same proof-carrying path used
-by resources and machine contracts.
+The compiler produces certificate schema v8. Protocol rows add objectives,
+milestones, tasks, gates, decisions, and notes to the same proof-carrying path
+used by resources, workspace transforms, and machine contracts. Tensor rows add
+shape, dtype, gradient, layout, dataset, model, accelerator, training,
+canonical, artifact, lowering, executor, and witness contracts.
 
 | Crate | Responsibility |
 | --- | --- |
@@ -92,6 +107,6 @@ by resources and machine contracts.
 | `ent-tensor` | Verify tensor manifests/witnesses and execute checked tensor graphs on CPU |
 | `ent-graphics` | Execute `.ent` graphics libraries and write deterministic images |
 | `ent-transform` | Apply verified workspace transforms |
-| `ent-cli` | Shared command surface for check, build, tensor bench, render, and doctor |
+| `ent-cli` | Shared command surface for check, build, plan, apply, tensor bench, render, and doctor |
 
 Design notes and research anchors are in `agent-notes/`.

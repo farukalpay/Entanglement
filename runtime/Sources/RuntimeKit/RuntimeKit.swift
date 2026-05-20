@@ -7,7 +7,7 @@ import Metal
 #endif
 
 private let minimumBundleManifestSchemaVersion = 3
-private let currentBundleManifestSchemaVersion = 7
+private let currentBundleManifestSchemaVersion = 8
 
 public enum RuntimeStatus: Equatable {
     case realized

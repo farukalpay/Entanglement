@@ -30,3 +30,27 @@ world RepoCleanup(agent Operator, space Workspace) {
     assert_eq!(ast.transforms[3].replacement.as_ref().unwrap().from, "old");
     assert_eq!(ast.validators[0].argv, vec!["cargo", "test"]);
 }
+
+#[test]
+fn parser_accepts_protocol_declarations() {
+    let source = r#"
+world ProtocolFlow(role Maintainer, space Workspace) {
+  state tree : Resource
+  objective workspace_upgrade priority critical summary "Make checked workspace changes easier to stage and review" evidence roadmap_record
+  milestone reviewable_changes objective workspace_upgrade state active due "2026-06-01" evidence schedule_record
+  task dry_run_report milestone reviewable_changes kind implement state ready owner maintainer requires [] outputs ["apply-report"] title "Report changes before writing them" evidence task_record
+  gate dry_run_checks task dry_run_report check "validator:cargo_test" expect "pass" evidence gate_record
+  decision report_shape scope task:dry_run_report choose "reuse apply report" because "one report shape keeps review and write paths comparable" alternatives ["separate summary"] evidence decision_record
+  note review_note scope gate:dry_run_checks text "Validators run against the staged tree before writes are materialized" tags [workspace,review] evidence note_record
+}
+"#;
+
+    let ast = parse_world(source).expect("protocol syntax should parse");
+
+    assert_eq!(ast.objectives[0].priority, "critical");
+    assert_eq!(ast.milestones[0].objective, "workspace_upgrade");
+    assert_eq!(ast.tasks[0].outputs, vec!["apply-report"]);
+    assert_eq!(ast.gates[0].check, "validator:cargo_test");
+    assert_eq!(ast.decisions[0].alternatives, vec!["separate summary"]);
+    assert_eq!(ast.notes[0].tags, vec!["workspace", "review"]);
+}
