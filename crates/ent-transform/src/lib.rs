@@ -30,6 +30,23 @@ pub struct ApplyOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TransformPreviewReport {
+    pub apply: ApplyReport,
+    pub patch_files: Vec<PatchFile>,
+    pub patch: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PatchFile {
+    pub path: String,
+    pub action: FileAction,
+    pub before_hash: Option<String>,
+    pub after_hash: Option<String>,
+    pub text: Option<String>,
+    pub omitted_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FileChange {
     pub path: String,
     pub action: FileAction,
@@ -104,6 +121,24 @@ pub fn apply_certificate_with_options(
     repo: &Path,
     options: ApplyOptions,
 ) -> Result<ApplyReport, TransformError> {
+    let output = run_certificate_transforms(cert, repo, options.dry_run, false, true)?;
+    Ok(output.apply)
+}
+
+pub fn preview_certificate(
+    cert: &Certificate,
+    repo: &Path,
+) -> Result<TransformPreviewReport, TransformError> {
+    run_certificate_transforms(cert, repo, true, true, false)
+}
+
+fn run_certificate_transforms(
+    cert: &Certificate,
+    repo: &Path,
+    dry_run: bool,
+    include_patch: bool,
+    fail_on_validator_error: bool,
+) -> Result<TransformPreviewReport, TransformError> {
     verify(cert)?;
     let repo = repo
         .canonicalize()
@@ -131,17 +166,35 @@ pub fn apply_certificate_with_options(
         context.apply_transform(transform)?;
     }
 
-    let validator_reports = run_validators(&cert.validators, stage.path())?;
+    let validator_reports = if fail_on_validator_error {
+        run_validators(&cert.validators, stage.path())?
+    } else {
+        run_validators_collect(&cert.validators, stage.path())?
+    };
     let changed_files = context.materialize_report(&repo)?;
-    if !options.dry_run {
+    let patch_files = if include_patch {
+        context.materialize_patches(&repo)?
+    } else {
+        vec![]
+    };
+    let patch = if include_patch {
+        join_patch_files(&patch_files)
+    } else {
+        None
+    };
+    if !dry_run {
         apply_pending_changes(&repo, stage.path(), &context.pending)?;
     }
 
-    Ok(ApplyReport {
-        world: cert.world.clone(),
-        dry_run: options.dry_run,
-        changed_files,
-        validators: validator_reports,
+    Ok(TransformPreviewReport {
+        apply: ApplyReport {
+            world: cert.world.clone(),
+            dry_run,
+            changed_files,
+            validators: validator_reports,
+        },
+        patch_files,
+        patch,
     })
 }
 
@@ -532,6 +585,34 @@ impl TransformContext<'_> {
         }
         Ok(changes)
     }
+
+    fn materialize_patches(&self, repo: &Path) -> Result<Vec<PatchFile>, TransformError> {
+        let mut patches = Vec::new();
+        for (rel, action) in &self.pending {
+            let before = read_optional(repo.join(rel))?;
+            let after = read_optional(self.root.join(rel))?;
+            if before == after && !matches!(action, PendingAction::Delete) {
+                continue;
+            }
+            let before_hash = before.as_deref().map(sha256_uri);
+            let after_hash = after.as_deref().map(sha256_uri);
+            let path = display_rel(rel);
+            let (text, omitted_reason) =
+                unified_patch_for_change(&path, before.as_deref(), after.as_deref());
+            patches.push(PatchFile {
+                path,
+                action: match action {
+                    PendingAction::Write => FileAction::Write,
+                    PendingAction::Delete => FileAction::Delete,
+                },
+                before_hash,
+                after_hash,
+                text,
+                omitted_reason,
+            });
+        }
+        Ok(patches)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -758,6 +839,27 @@ fn run_validators(
             });
         }
         reports.push(report);
+    }
+    Ok(reports)
+}
+
+fn run_validators_collect(
+    validators: &[ValidatorContract],
+    root: &Path,
+) -> Result<Vec<ValidatorReport>, TransformError> {
+    let mut reports = Vec::new();
+    for validator in validators {
+        let output = Command::new(&validator.argv[0])
+            .args(&validator.argv[1..])
+            .current_dir(root)
+            .output()?;
+        reports.push(ValidatorReport {
+            name: validator.name.clone(),
+            argv: validator.argv.clone(),
+            status: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
     }
     Ok(reports)
 }
@@ -1683,6 +1785,108 @@ fn read_optional(path: impl AsRef<Path>) -> Result<Option<Vec<u8>>, TransformErr
         Ok(Some(fs::read(path)?))
     } else {
         Ok(None)
+    }
+}
+
+fn unified_patch_for_change(
+    path: &str,
+    before: Option<&[u8]>,
+    after: Option<&[u8]>,
+) -> (Option<String>, Option<String>) {
+    let before_text = match before {
+        Some(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => Some(text),
+            Err(_) => return (None, Some("before content is not valid UTF-8".to_owned())),
+        },
+        None => None,
+    };
+    let after_text = match after {
+        Some(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => Some(text),
+            Err(_) => return (None, Some("after content is not valid UTF-8".to_owned())),
+        },
+        None => None,
+    };
+    (
+        Some(render_unified_patch(path, before_text, after_text)),
+        None,
+    )
+}
+
+fn join_patch_files(patches: &[PatchFile]) -> Option<String> {
+    let mut output = String::new();
+    for patch in patches {
+        if let Some(text) = &patch.text {
+            output.push_str(text);
+            if !text.ends_with('\n') {
+                output.push('\n');
+            }
+        }
+    }
+    if output.is_empty() {
+        None
+    } else {
+        Some(output)
+    }
+}
+
+fn render_unified_patch(path: &str, before: Option<&str>, after: Option<&str>) -> String {
+    let before_lines = before.map(patch_lines).unwrap_or_default();
+    let after_lines = after.map(patch_lines).unwrap_or_default();
+    let mut out = String::new();
+    out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+    match (before, after) {
+        (None, Some(_)) => {
+            out.push_str("new file mode 100644\n");
+            out.push_str("--- /dev/null\n");
+            out.push_str(&format!("+++ b/{path}\n"));
+        }
+        (Some(_), None) => {
+            out.push_str("deleted file mode 100644\n");
+            out.push_str(&format!("--- a/{path}\n"));
+            out.push_str("+++ /dev/null\n");
+        }
+        _ => {
+            out.push_str(&format!("--- a/{path}\n"));
+            out.push_str(&format!("+++ b/{path}\n"));
+        }
+    }
+    out.push_str(&format!(
+        "@@ -{},{} +{},{} @@\n",
+        patch_start(before_lines.len()),
+        before_lines.len(),
+        patch_start(after_lines.len()),
+        after_lines.len()
+    ));
+    for line in before_lines {
+        out.push('-');
+        out.push_str(&line);
+        out.push('\n');
+    }
+    for line in after_lines {
+        out.push('+');
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+fn patch_lines(source: &str) -> Vec<String> {
+    source
+        .split_inclusive('\n')
+        .map(|line| {
+            line.trim_end_matches('\n')
+                .trim_end_matches('\r')
+                .to_owned()
+        })
+        .collect()
+}
+
+fn patch_start(line_count: usize) -> usize {
+    if line_count == 0 {
+        0
+    } else {
+        1
     }
 }
 

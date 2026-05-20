@@ -1,0 +1,338 @@
+world RuntimeIncidentForge(agent Maintainer, agent Runner, space Repository) {
+  state repo : Resource
+  workspace codebase uses filesystem write evidence codebase_boundary
+  parser rust language rust via tree-sitter evidence rust_runtime_parser
+  document markdown via pulldown_cmark evidence markdown_runtime_parser
+  select runtime_sources = files where parsed_by(rust) evidence runtime_source_scope
+  validator cargo_test argv ["cargo", "test", "-p", "ent-cli"] evidence cargo_test_runtime_record
+
+  objective self_healing_runtime priority critical summary "Turn runtime failures into bounded patch, test, and report loops" evidence runtime_objective_record
+  milestone detect objective self_healing_runtime state active due "2026-06-30" evidence detect_milestone_record
+  milestone repair objective self_healing_runtime state active due "2026-07-15" evidence repair_milestone_record
+  milestone explain objective self_healing_runtime state planned due "2026-08-01" evidence explain_milestone_record
+  task triage_failure milestone detect kind research state ready owner maintainer requires [] outputs ["incident-card","risk-map"] title "Capture failing command context and classify the next safe move" evidence triage_task_record
+  task propose_patch milestone repair kind implement state active owner maintainer requires [triage_failure] outputs ["patch-plan","diff-preview"] title "Draft a bounded patch with every write surface listed" evidence patch_task_record
+  task verify_patch milestone repair kind verify state ready owner runner requires [propose_patch] outputs ["test-output","ledger-entry"] title "Run the selected validation command and seal the result" evidence verify_task_record
+  task narrate_result milestone explain kind document state todo owner maintainer requires [verify_patch] outputs ["release-note","operator-brief"] title "Explain what changed, what passed, and what remains risky" evidence narrate_task_record
+  gate triage_has_ledger task triage_failure check "record:incident-ledger" expect "recorded" evidence triage_gate_record
+  gate patch_has_tests task verify_patch check "validator:cargo_test" expect "pass" evidence patch_gate_record
+  gate report_has_digest task narrate_result check "record:report-digest" expect "recorded" evidence report_gate_record
+  decision patch_policy scope task:propose_patch choose "workspace-write with review hooks" because "the loop must be useful without granting unrestricted writes" alternatives ["read-only advisory","full access automation"] evidence patch_policy_decision
+  decision ledger_shape scope gate:triage_has_ledger choose "jsonl event stream" because "append-only rows make replay and diff review easy" alternatives ["sqlite first","markdown log"] evidence ledger_shape_decision
+  note operator_story scope objective:self_healing_runtime text "The runtime behaves like a small incident studio: detect, propose, verify, explain." tags [runtime,incident,repair] evidence operator_story_note
+  note safety_story scope decision:patch_policy text "The repair loop can write only through named tools and policy rows." tags [runtime,policy,safety] evidence safety_story_note
+
+  lane observe owner maintainer status active purpose "Collect failures and classify risk without mutating the repository" capacity 3 evidence observe_lane_record
+  lane repair_lane owner runner status active purpose "Own bounded patch and test attempts" capacity 2 evidence repair_lane_record
+  lane explain_lane owner maintainer status planned purpose "Prepare the final human-readable incident brief" capacity 1 evidence explain_lane_record
+  claim observe_claim lane observe scope task:triage_failure mode observe policy shared reason "Triage reads source, test output, and ledger rows" evidence observe_claim_record
+  claim repair_claim lane repair_lane scope task:propose_patch mode write policy exclusive reason "Only the repair loop may stage patch writes" evidence repair_claim_record
+  claim explain_claim lane explain_lane scope task:narrate_result mode review policy shared reason "The final report reviews sealed outputs" evidence explain_claim_record
+  handoff triage_to_repair from observe to repair_lane item task:propose_patch state proposed summary "A classified incident becomes a bounded patch plan" evidence triage_handoff_record
+  handoff repair_to_explain from repair_lane to explain_lane item task:narrate_result state proposed summary "A verified patch becomes an operator brief" evidence explain_handoff_record
+  sync repair_sync source repair_lane target explain_lane strategy staged checks [task:verify_patch,gate:patch_has_tests,record:runtime-checks] evidence repair_sync_record
+  checkpoint incident_ready lane observe state green summary "The incident has a ledger, a risk map, and a chosen repair policy" blockers [] next [handoff:triage_to_repair] evidence incident_checkpoint_record
+  checkpoint release_ready lane explain_lane state yellow summary "The brief waits for the latest validation digest" blockers [gate:report_has_digest] next [sync:repair_sync] evidence release_checkpoint_record
+
+  runtime-ledger incident_ledger store jsonl retention "30d" fields [session,turn,tool,status,artifact,latency,risk] evidence incident_ledger_manifest
+  runtime-policy quiet_guard approval on-request sandbox workspace-write network guarded allow [inspect_repo,render_diff,apply_patch,run_tests,emit_report,local_tool_bus] deny [danger_full_access,network_wildcard] evidence quiet_guard_policy
+  runtime-policy sealed_reader approval never sandbox read-only network off allow [inspect_repo,emit_report] deny [apply_patch,run_tests,network_wildcard] evidence sealed_reader_policy
+  runtime-session repair_studio owner maintainer mode autonomous state active ledger incident_ledger evidence repair_studio_session
+  runtime-session report_room owner maintainer mode interactive state active ledger incident_ledger evidence report_room_session
+  runtime-tool inspect_repo kind inspect risk low policy quiet_guard reads ["repo","ledger"] writes [] evidence inspect_repo_tool
+  runtime-tool render_diff kind render risk low policy quiet_guard reads ["patch-preview"] writes ["review-card"] evidence render_diff_tool
+  runtime-tool apply_patch kind patch risk medium policy quiet_guard reads ["patch-plan"] writes ["workspace"] evidence apply_patch_tool
+  runtime-tool run_tests kind shell risk medium policy quiet_guard reads ["workspace"] writes ["target"] evidence run_tests_tool
+  runtime-tool emit_report kind workflow risk low policy sealed_reader reads ["ledger","test-output"] writes ["runtime-report"] evidence emit_report_tool
+  runtime-bridge local_tool_bus kind mcp policy quiet_guard endpoint "local://runtime/tools" exposes [inspect_repo,render_diff,apply_patch,run_tests,emit_report] evidence local_tool_bridge
+  runtime-hook guard_shell event pre-tool-use target policy:quiet_guard action "Escalate medium-risk shell calls into the repair lane before execution" evidence guard_shell_hook
+  runtime-hook append_outcome event post-tool-use target ledger:incident_ledger action "Append tool status, digest, latency, and risk after every call" evidence append_outcome_hook
+  runtime-hook brief_stop event stop target turn:release_brief action "Seal the operator brief only after ledger and digest rows exist" evidence brief_stop_hook
+  runtime-turn triage_loop session repair_studio policy quiet_guard tools [inspect_repo,render_diff,emit_report] budget 16 objective "Classify a failing command and produce an incident card with bounded next steps" evidence triage_turn_record
+  runtime-turn patch_loop session repair_studio policy quiet_guard tools [inspect_repo,apply_patch,run_tests,emit_report] budget 32 objective "Apply the smallest useful patch, run the selected tests, and write the result to the ledger" evidence patch_turn_record
+  runtime-turn release_brief session report_room policy sealed_reader tools [inspect_repo,emit_report] budget 8 objective "Summarize the sealed incident for a human maintainer without further writes" evidence release_turn_record
+
+  theorem rust_parser_safe : parser_admissible(rust)
+  theorem markdown_parser_safe : parser_admissible(markdown)
+  theorem runtime_sources_safe : selection_admissible(runtime_sources)
+  theorem cargo_test_safe : validator_admissible(cargo_test)
+  theorem objective_safe : objective_admissible(self_healing_runtime)
+  theorem detect_safe : milestone_admissible(detect)
+  theorem repair_safe : milestone_admissible(repair)
+  theorem explain_safe : milestone_admissible(explain)
+  theorem triage_task_safe : task_admissible(triage_failure)
+  theorem patch_task_safe : task_admissible(propose_patch)
+  theorem verify_task_safe : task_admissible(verify_patch)
+  theorem narrate_task_safe : task_admissible(narrate_result)
+  theorem triage_gate_safe : gate_admissible(triage_has_ledger)
+  theorem patch_gate_safe : gate_admissible(patch_has_tests)
+  theorem report_gate_safe : gate_admissible(report_has_digest)
+  theorem patch_decision_safe : decision_admissible(patch_policy)
+  theorem ledger_decision_safe : decision_admissible(ledger_shape)
+  theorem operator_note_safe : note_admissible(operator_story)
+  theorem safety_note_safe : note_admissible(safety_story)
+  theorem observe_lane_safe : lane_admissible(observe)
+  theorem repair_lane_safe : lane_admissible(repair_lane)
+  theorem explain_lane_safe : lane_admissible(explain_lane)
+  theorem observe_claim_safe : claim_admissible(observe_claim)
+  theorem repair_claim_safe : claim_admissible(repair_claim)
+  theorem explain_claim_safe : claim_admissible(explain_claim)
+  theorem triage_handoff_safe : handoff_admissible(triage_to_repair)
+  theorem explain_handoff_safe : handoff_admissible(repair_to_explain)
+  theorem repair_sync_safe : sync_admissible(repair_sync)
+  theorem incident_checkpoint_safe : checkpoint_admissible(incident_ready)
+  theorem release_checkpoint_safe : checkpoint_admissible(release_ready)
+  theorem incident_ledger_safe : runtime_ledger_admissible(incident_ledger)
+  theorem quiet_guard_safe : runtime_policy_admissible(quiet_guard)
+  theorem sealed_reader_safe : runtime_policy_admissible(sealed_reader)
+  theorem repair_studio_safe : runtime_session_admissible(repair_studio)
+  theorem report_room_safe : runtime_session_admissible(report_room)
+  theorem inspect_repo_safe : runtime_tool_admissible(inspect_repo)
+  theorem render_diff_safe : runtime_tool_admissible(render_diff)
+  theorem apply_patch_safe : runtime_tool_admissible(apply_patch)
+  theorem run_tests_safe : runtime_tool_admissible(run_tests)
+  theorem emit_report_safe : runtime_tool_admissible(emit_report)
+  theorem local_tool_bus_safe : runtime_bridge_admissible(local_tool_bus)
+  theorem guard_shell_safe : runtime_hook_admissible(guard_shell)
+  theorem append_outcome_safe : runtime_hook_admissible(append_outcome)
+  theorem brief_stop_safe : runtime_hook_admissible(brief_stop)
+  theorem triage_loop_safe : runtime_turn_admissible(triage_loop)
+  theorem patch_loop_safe : runtime_turn_admissible(patch_loop)
+  theorem release_brief_safe : runtime_turn_admissible(release_brief)
+
+  proof rust_parser_safe {
+    let row = row parser rust
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof markdown_parser_safe {
+    let row = row parser markdown
+    let fact = rule parser_admissible_from_parser(row)
+    qed fact
+  }
+  proof runtime_sources_safe {
+    let row = row selection runtime_sources
+    let fact = rule selection_admissible_from_selection(row)
+    qed fact
+  }
+  proof cargo_test_safe {
+    let row = row validator cargo_test
+    let fact = rule validator_admissible_from_validator(row)
+    qed fact
+  }
+  proof objective_safe {
+    let row = row objective self_healing_runtime
+    let fact = rule objective_admissible_from_objective(row)
+    qed fact
+  }
+  proof detect_safe {
+    let row = row milestone detect
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof repair_safe {
+    let row = row milestone repair
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof explain_safe {
+    let row = row milestone explain
+    let fact = rule milestone_admissible_from_milestone(row)
+    qed fact
+  }
+  proof triage_task_safe {
+    let row = row task triage_failure
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof patch_task_safe {
+    let row = row task propose_patch
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof verify_task_safe {
+    let row = row task verify_patch
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof narrate_task_safe {
+    let row = row task narrate_result
+    let fact = rule task_admissible_from_task(row)
+    qed fact
+  }
+  proof triage_gate_safe {
+    let row = row gate triage_has_ledger
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof patch_gate_safe {
+    let row = row gate patch_has_tests
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof report_gate_safe {
+    let row = row gate report_has_digest
+    let fact = rule gate_admissible_from_gate(row)
+    qed fact
+  }
+  proof patch_decision_safe {
+    let row = row decision patch_policy
+    let fact = rule decision_admissible_from_decision(row)
+    qed fact
+  }
+  proof ledger_decision_safe {
+    let row = row decision ledger_shape
+    let fact = rule decision_admissible_from_decision(row)
+    qed fact
+  }
+  proof operator_note_safe {
+    let row = row note operator_story
+    let fact = rule note_admissible_from_note(row)
+    qed fact
+  }
+  proof safety_note_safe {
+    let row = row note safety_story
+    let fact = rule note_admissible_from_note(row)
+    qed fact
+  }
+  proof observe_lane_safe {
+    let row = row lane observe
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof repair_lane_safe {
+    let row = row lane repair_lane
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof explain_lane_safe {
+    let row = row lane explain_lane
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof observe_claim_safe {
+    let row = row claim observe_claim
+    let fact = rule claim_admissible_from_claim(row)
+    qed fact
+  }
+  proof repair_claim_safe {
+    let row = row claim repair_claim
+    let fact = rule claim_admissible_from_claim(row)
+    qed fact
+  }
+  proof explain_claim_safe {
+    let row = row claim explain_claim
+    let fact = rule claim_admissible_from_claim(row)
+    qed fact
+  }
+  proof triage_handoff_safe {
+    let row = row handoff triage_to_repair
+    let fact = rule handoff_admissible_from_handoff(row)
+    qed fact
+  }
+  proof explain_handoff_safe {
+    let row = row handoff repair_to_explain
+    let fact = rule handoff_admissible_from_handoff(row)
+    qed fact
+  }
+  proof repair_sync_safe {
+    let row = row sync repair_sync
+    let fact = rule sync_admissible_from_sync(row)
+    qed fact
+  }
+  proof incident_checkpoint_safe {
+    let row = row checkpoint incident_ready
+    let fact = rule checkpoint_admissible_from_checkpoint(row)
+    qed fact
+  }
+  proof release_checkpoint_safe {
+    let row = row checkpoint release_ready
+    let fact = rule checkpoint_admissible_from_checkpoint(row)
+    qed fact
+  }
+  proof incident_ledger_safe {
+    let row = row runtime-ledger incident_ledger
+    let fact = rule runtime_ledger_admissible_from_runtime_ledger(row)
+    qed fact
+  }
+  proof quiet_guard_safe {
+    let row = row runtime-policy quiet_guard
+    let fact = rule runtime_policy_admissible_from_runtime_policy(row)
+    qed fact
+  }
+  proof sealed_reader_safe {
+    let row = row runtime-policy sealed_reader
+    let fact = rule runtime_policy_admissible_from_runtime_policy(row)
+    qed fact
+  }
+  proof repair_studio_safe {
+    let row = row runtime-session repair_studio
+    let fact = rule runtime_session_admissible_from_runtime_session(row)
+    qed fact
+  }
+  proof report_room_safe {
+    let row = row runtime-session report_room
+    let fact = rule runtime_session_admissible_from_runtime_session(row)
+    qed fact
+  }
+  proof inspect_repo_safe {
+    let row = row runtime-tool inspect_repo
+    let fact = rule runtime_tool_admissible_from_runtime_tool(row)
+    qed fact
+  }
+  proof render_diff_safe {
+    let row = row runtime-tool render_diff
+    let fact = rule runtime_tool_admissible_from_runtime_tool(row)
+    qed fact
+  }
+  proof apply_patch_safe {
+    let row = row runtime-tool apply_patch
+    let fact = rule runtime_tool_admissible_from_runtime_tool(row)
+    qed fact
+  }
+  proof run_tests_safe {
+    let row = row runtime-tool run_tests
+    let fact = rule runtime_tool_admissible_from_runtime_tool(row)
+    qed fact
+  }
+  proof emit_report_safe {
+    let row = row runtime-tool emit_report
+    let fact = rule runtime_tool_admissible_from_runtime_tool(row)
+    qed fact
+  }
+  proof local_tool_bus_safe {
+    let row = row runtime-bridge local_tool_bus
+    let fact = rule runtime_bridge_admissible_from_runtime_bridge(row)
+    qed fact
+  }
+  proof guard_shell_safe {
+    let row = row runtime-hook guard_shell
+    let fact = rule runtime_hook_admissible_from_runtime_hook(row)
+    qed fact
+  }
+  proof append_outcome_safe {
+    let row = row runtime-hook append_outcome
+    let fact = rule runtime_hook_admissible_from_runtime_hook(row)
+    qed fact
+  }
+  proof brief_stop_safe {
+    let row = row runtime-hook brief_stop
+    let fact = rule runtime_hook_admissible_from_runtime_hook(row)
+    qed fact
+  }
+  proof triage_loop_safe {
+    let row = row runtime-turn triage_loop
+    let fact = rule runtime_turn_admissible_from_runtime_turn(row)
+    qed fact
+  }
+  proof patch_loop_safe {
+    let row = row runtime-turn patch_loop
+    let fact = rule runtime_turn_admissible_from_runtime_turn(row)
+    qed fact
+  }
+  proof release_brief_safe {
+    let row = row runtime-turn release_brief
+    let fact = rule runtime_turn_admissible_from_runtime_turn(row)
+    qed fact
+  }
+}

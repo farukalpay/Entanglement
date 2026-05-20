@@ -25,6 +25,18 @@ pub enum PropositionKind {
     GateAdmissible,
     DecisionAdmissible,
     NoteAdmissible,
+    LaneAdmissible,
+    ClaimAdmissible,
+    HandoffAdmissible,
+    SyncAdmissible,
+    CheckpointAdmissible,
+    RuntimeLedgerAdmissible,
+    RuntimePolicyAdmissible,
+    RuntimeSessionAdmissible,
+    RuntimeToolAdmissible,
+    RuntimeTurnAdmissible,
+    RuntimeHookAdmissible,
+    RuntimeBridgeAdmissible,
     GraphicsAdmissible,
     RenderTargetAdmissible,
     RenderPipelineAdmissible,
@@ -71,6 +83,18 @@ pub enum RowKind {
     Gate,
     Decision,
     Note,
+    Lane,
+    Claim,
+    Handoff,
+    Sync,
+    Checkpoint,
+    RuntimeLedger,
+    RuntimePolicy,
+    RuntimeSession,
+    RuntimeTool,
+    RuntimeTurn,
+    RuntimeHook,
+    RuntimeBridge,
     Graphics,
     RenderTarget,
     RenderPipeline,
@@ -110,6 +134,18 @@ pub enum PrimitiveRule {
     GateAdmissibleFromGate,
     DecisionAdmissibleFromDecision,
     NoteAdmissibleFromNote,
+    LaneAdmissibleFromLane,
+    ClaimAdmissibleFromClaim,
+    HandoffAdmissibleFromHandoff,
+    SyncAdmissibleFromSync,
+    CheckpointAdmissibleFromCheckpoint,
+    RuntimeLedgerAdmissibleFromRuntimeLedger,
+    RuntimePolicyAdmissibleFromRuntimePolicy,
+    RuntimeSessionAdmissibleFromRuntimeSession,
+    RuntimeToolAdmissibleFromRuntimeTool,
+    RuntimeTurnAdmissibleFromRuntimeTurn,
+    RuntimeHookAdmissibleFromRuntimeHook,
+    RuntimeBridgeAdmissibleFromRuntimeBridge,
     GraphicsAdmissibleFromGraphics,
     RenderTargetAdmissibleFromRenderTarget,
     RenderPipelineAdmissibleFromRenderPipeline,
@@ -211,6 +247,18 @@ pub fn parse_proposition(input: &str) -> Result<Proposition, ProofParseError> {
         "gate_admissible" => PropositionKind::GateAdmissible,
         "decision_admissible" => PropositionKind::DecisionAdmissible,
         "note_admissible" => PropositionKind::NoteAdmissible,
+        "lane_admissible" => PropositionKind::LaneAdmissible,
+        "claim_admissible" => PropositionKind::ClaimAdmissible,
+        "handoff_admissible" => PropositionKind::HandoffAdmissible,
+        "sync_admissible" => PropositionKind::SyncAdmissible,
+        "checkpoint_admissible" => PropositionKind::CheckpointAdmissible,
+        "runtime_ledger_admissible" => PropositionKind::RuntimeLedgerAdmissible,
+        "runtime_policy_admissible" => PropositionKind::RuntimePolicyAdmissible,
+        "runtime_session_admissible" => PropositionKind::RuntimeSessionAdmissible,
+        "runtime_tool_admissible" => PropositionKind::RuntimeToolAdmissible,
+        "runtime_turn_admissible" => PropositionKind::RuntimeTurnAdmissible,
+        "runtime_hook_admissible" => PropositionKind::RuntimeHookAdmissible,
+        "runtime_bridge_admissible" => PropositionKind::RuntimeBridgeAdmissible,
         "graphics_admissible" => PropositionKind::GraphicsAdmissible,
         "render_target_admissible" => PropositionKind::RenderTargetAdmissible,
         "render_pipeline_admissible" => PropositionKind::RenderPipelineAdmissible,
@@ -343,6 +391,18 @@ fn parse_row_kind(input: &str) -> Result<RowKind, ProofParseError> {
         "gate" => Ok(RowKind::Gate),
         "decision" => Ok(RowKind::Decision),
         "note" => Ok(RowKind::Note),
+        "lane" => Ok(RowKind::Lane),
+        "claim" => Ok(RowKind::Claim),
+        "handoff" => Ok(RowKind::Handoff),
+        "sync" => Ok(RowKind::Sync),
+        "checkpoint" => Ok(RowKind::Checkpoint),
+        "runtime-ledger" => Ok(RowKind::RuntimeLedger),
+        "runtime-policy" => Ok(RowKind::RuntimePolicy),
+        "runtime-session" => Ok(RowKind::RuntimeSession),
+        "runtime-tool" => Ok(RowKind::RuntimeTool),
+        "runtime-turn" => Ok(RowKind::RuntimeTurn),
+        "runtime-hook" => Ok(RowKind::RuntimeHook),
+        "runtime-bridge" => Ok(RowKind::RuntimeBridge),
         "graphics" => Ok(RowKind::Graphics),
         "render-target" => Ok(RowKind::RenderTarget),
         "render-pipeline" => Ok(RowKind::RenderPipeline),
@@ -400,6 +460,34 @@ fn parse_rule(input: &str) -> Result<PrimitiveRule, ProofParseError> {
         "gate_admissible_from_gate" => Ok(PrimitiveRule::GateAdmissibleFromGate),
         "decision_admissible_from_decision" => Ok(PrimitiveRule::DecisionAdmissibleFromDecision),
         "note_admissible_from_note" => Ok(PrimitiveRule::NoteAdmissibleFromNote),
+        "lane_admissible_from_lane" => Ok(PrimitiveRule::LaneAdmissibleFromLane),
+        "claim_admissible_from_claim" => Ok(PrimitiveRule::ClaimAdmissibleFromClaim),
+        "handoff_admissible_from_handoff" => Ok(PrimitiveRule::HandoffAdmissibleFromHandoff),
+        "sync_admissible_from_sync" => Ok(PrimitiveRule::SyncAdmissibleFromSync),
+        "checkpoint_admissible_from_checkpoint" => {
+            Ok(PrimitiveRule::CheckpointAdmissibleFromCheckpoint)
+        }
+        "runtime_ledger_admissible_from_runtime_ledger" => {
+            Ok(PrimitiveRule::RuntimeLedgerAdmissibleFromRuntimeLedger)
+        }
+        "runtime_policy_admissible_from_runtime_policy" => {
+            Ok(PrimitiveRule::RuntimePolicyAdmissibleFromRuntimePolicy)
+        }
+        "runtime_session_admissible_from_runtime_session" => {
+            Ok(PrimitiveRule::RuntimeSessionAdmissibleFromRuntimeSession)
+        }
+        "runtime_tool_admissible_from_runtime_tool" => {
+            Ok(PrimitiveRule::RuntimeToolAdmissibleFromRuntimeTool)
+        }
+        "runtime_turn_admissible_from_runtime_turn" => {
+            Ok(PrimitiveRule::RuntimeTurnAdmissibleFromRuntimeTurn)
+        }
+        "runtime_hook_admissible_from_runtime_hook" => {
+            Ok(PrimitiveRule::RuntimeHookAdmissibleFromRuntimeHook)
+        }
+        "runtime_bridge_admissible_from_runtime_bridge" => {
+            Ok(PrimitiveRule::RuntimeBridgeAdmissibleFromRuntimeBridge)
+        }
         "graphics_admissible_from_graphics" => Ok(PrimitiveRule::GraphicsAdmissibleFromGraphics),
         "render_target_admissible_from_render_target" => {
             Ok(PrimitiveRule::RenderTargetAdmissibleFromRenderTarget)
@@ -698,6 +786,46 @@ fn rule_contract(rule: &PrimitiveRule) -> RuleContract {
         PrimitiveRule::NoteAdmissibleFromNote => {
             unary_rule(RowKind::Note, PropositionKind::NoteAdmissible)
         }
+        PrimitiveRule::LaneAdmissibleFromLane => {
+            unary_rule(RowKind::Lane, PropositionKind::LaneAdmissible)
+        }
+        PrimitiveRule::ClaimAdmissibleFromClaim => {
+            unary_rule(RowKind::Claim, PropositionKind::ClaimAdmissible)
+        }
+        PrimitiveRule::HandoffAdmissibleFromHandoff => {
+            unary_rule(RowKind::Handoff, PropositionKind::HandoffAdmissible)
+        }
+        PrimitiveRule::SyncAdmissibleFromSync => {
+            unary_rule(RowKind::Sync, PropositionKind::SyncAdmissible)
+        }
+        PrimitiveRule::CheckpointAdmissibleFromCheckpoint => {
+            unary_rule(RowKind::Checkpoint, PropositionKind::CheckpointAdmissible)
+        }
+        PrimitiveRule::RuntimeLedgerAdmissibleFromRuntimeLedger => unary_rule(
+            RowKind::RuntimeLedger,
+            PropositionKind::RuntimeLedgerAdmissible,
+        ),
+        PrimitiveRule::RuntimePolicyAdmissibleFromRuntimePolicy => unary_rule(
+            RowKind::RuntimePolicy,
+            PropositionKind::RuntimePolicyAdmissible,
+        ),
+        PrimitiveRule::RuntimeSessionAdmissibleFromRuntimeSession => unary_rule(
+            RowKind::RuntimeSession,
+            PropositionKind::RuntimeSessionAdmissible,
+        ),
+        PrimitiveRule::RuntimeToolAdmissibleFromRuntimeTool => {
+            unary_rule(RowKind::RuntimeTool, PropositionKind::RuntimeToolAdmissible)
+        }
+        PrimitiveRule::RuntimeTurnAdmissibleFromRuntimeTurn => {
+            unary_rule(RowKind::RuntimeTurn, PropositionKind::RuntimeTurnAdmissible)
+        }
+        PrimitiveRule::RuntimeHookAdmissibleFromRuntimeHook => {
+            unary_rule(RowKind::RuntimeHook, PropositionKind::RuntimeHookAdmissible)
+        }
+        PrimitiveRule::RuntimeBridgeAdmissibleFromRuntimeBridge => unary_rule(
+            RowKind::RuntimeBridge,
+            PropositionKind::RuntimeBridgeAdmissible,
+        ),
         PrimitiveRule::GraphicsAdmissibleFromGraphics => {
             unary_rule(RowKind::Graphics, PropositionKind::GraphicsAdmissible)
         }

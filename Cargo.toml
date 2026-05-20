@@ -8,8 +8,11 @@ members = [
     "crates/ent-opt",
     "crates/ent-transform",
     "crates/ent-inspect",
+    "crates/ent-review",
+    "crates/ent-runtime-audit",
     "crates/ent-tensor",
     "crates/ent-graphics",
+    "crates/ent-native-audit",
     "crates/ent-native-gfx",
     "crates/ent-cli",
 ]

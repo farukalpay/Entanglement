@@ -3,7 +3,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CERTIFICATE_SCHEMA_VERSION: u32 = 8;
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 9;
 pub const MIN_CERTIFICATE_SCHEMA_VERSION: u32 = 3;
 pub const MAX_MODAL_DIMENSIONS: usize = 12;
 
@@ -314,6 +314,130 @@ pub struct NoteContract {
     pub scope: String,
     pub text: String,
     pub tags: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneContract {
+    pub name: String,
+    pub owner: String,
+    pub status: String,
+    pub purpose: String,
+    pub capacity: u32,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimContract {
+    pub name: String,
+    pub lane: String,
+    pub scope: String,
+    pub mode: String,
+    pub policy: String,
+    pub reason: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandoffContract {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub item: String,
+    pub state: String,
+    pub summary: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncContract {
+    pub name: String,
+    pub source: String,
+    pub target: String,
+    pub strategy: String,
+    pub checks: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointContract {
+    pub name: String,
+    pub lane: String,
+    pub state: String,
+    pub summary: String,
+    pub blockers: Vec<String>,
+    pub next: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeLedgerContract {
+    pub name: String,
+    pub store: String,
+    pub retention: String,
+    pub fields: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimePolicyContract {
+    pub name: String,
+    pub approval: String,
+    pub sandbox: String,
+    pub network: String,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeSessionContract {
+    pub name: String,
+    pub owner: String,
+    pub mode: String,
+    pub state: String,
+    pub ledger: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeToolContract {
+    pub name: String,
+    pub kind: String,
+    pub risk: String,
+    pub policy: String,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeTurnContract {
+    pub name: String,
+    pub session: String,
+    pub policy: String,
+    pub tools: Vec<String>,
+    pub budget: u32,
+    pub objective: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeHookContract {
+    pub name: String,
+    pub event: String,
+    pub target: String,
+    pub action: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeBridgeContract {
+    pub name: String,
+    pub kind: String,
+    pub endpoint: String,
+    pub exposes: Vec<String>,
+    pub policy: String,
     pub evidence: String,
 }
 
@@ -687,6 +811,30 @@ pub struct Certificate {
     #[serde(default)]
     pub notes: Vec<NoteContract>,
     #[serde(default)]
+    pub lanes: Vec<LaneContract>,
+    #[serde(default)]
+    pub claims: Vec<ClaimContract>,
+    #[serde(default)]
+    pub handoffs: Vec<HandoffContract>,
+    #[serde(default)]
+    pub syncs: Vec<SyncContract>,
+    #[serde(default)]
+    pub checkpoints: Vec<CheckpointContract>,
+    #[serde(default)]
+    pub runtime_ledgers: Vec<RuntimeLedgerContract>,
+    #[serde(default)]
+    pub runtime_policies: Vec<RuntimePolicyContract>,
+    #[serde(default)]
+    pub runtime_sessions: Vec<RuntimeSessionContract>,
+    #[serde(default)]
+    pub runtime_tools: Vec<RuntimeToolContract>,
+    #[serde(default)]
+    pub runtime_turns: Vec<RuntimeTurnContract>,
+    #[serde(default)]
+    pub runtime_hooks: Vec<RuntimeHookContract>,
+    #[serde(default)]
+    pub runtime_bridges: Vec<RuntimeBridgeContract>,
+    #[serde(default)]
     pub graphics: Vec<GraphicContract>,
     #[serde(default)]
     pub render_targets: Vec<RenderTargetContract>,
@@ -754,6 +902,18 @@ pub struct CheckedRows {
     pub gates: usize,
     pub decisions: usize,
     pub notes: usize,
+    pub lanes: usize,
+    pub claims: usize,
+    pub handoffs: usize,
+    pub syncs: usize,
+    pub checkpoints: usize,
+    pub runtime_ledgers: usize,
+    pub runtime_policies: usize,
+    pub runtime_sessions: usize,
+    pub runtime_tools: usize,
+    pub runtime_turns: usize,
+    pub runtime_hooks: usize,
+    pub runtime_bridges: usize,
     pub graphics: usize,
     pub render_targets: usize,
     pub render_pipelines: usize,
@@ -803,6 +963,18 @@ pub enum InstabilityKind {
     GateInadmissible,
     DecisionInadmissible,
     NoteInadmissible,
+    LaneInadmissible,
+    ClaimInadmissible,
+    HandoffInadmissible,
+    SyncInadmissible,
+    CheckpointInadmissible,
+    RuntimeLedgerInadmissible,
+    RuntimePolicyInadmissible,
+    RuntimeSessionInadmissible,
+    RuntimeToolInadmissible,
+    RuntimeTurnInadmissible,
+    RuntimeHookInadmissible,
+    RuntimeBridgeInadmissible,
     GraphicsInadmissible,
     RenderTargetInadmissible,
     RenderPipelineInadmissible,

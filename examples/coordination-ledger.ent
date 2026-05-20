@@ -1,0 +1,53 @@
+world CoordinationLedger(role Maintainer, space Repository) {
+  lane core owner maintainer status active purpose "Protect central compiler work" capacity 2 evidence core_lane_record
+  lane review owner maintainer status review purpose "Hold reviewed changes before release" capacity 2 evidence review_lane_record
+  lane release owner maintainer status planned purpose "Prepare staged changes for publication" capacity 1 evidence release_lane_record
+  claim parser_claim lane core scope file:"crates/ent-parser/src/lib.rs" mode write policy exclusive reason "Parser grammar update" evidence parser_claim_record
+  handoff parser_to_kernel from core to review item claim:parser_claim state proposed summary "Parser rows ready for kernel validation" evidence parser_handoff_record
+  sync kernel_merge source review target release strategy staged checks [record:coordination_checks] evidence kernel_sync_record
+  checkpoint core_checkpoint lane core state green summary "Parser and kernel rows agree" blockers [] next [sync:kernel_merge] evidence core_checkpoint_record
+
+  theorem core_lane_admissible : lane_admissible(core)
+  theorem review_lane_admissible : lane_admissible(review)
+  theorem release_lane_admissible : lane_admissible(release)
+  theorem claim_admissible : claim_admissible(parser_claim)
+  theorem handoff_admissible : handoff_admissible(parser_to_kernel)
+  theorem sync_admissible : sync_admissible(kernel_merge)
+  theorem checkpoint_admissible : checkpoint_admissible(core_checkpoint)
+
+  proof core_lane_admissible {
+    let row = row lane core
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof review_lane_admissible {
+    let row = row lane review
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof release_lane_admissible {
+    let row = row lane release
+    let fact = rule lane_admissible_from_lane(row)
+    qed fact
+  }
+  proof claim_admissible {
+    let row = row claim parser_claim
+    let fact = rule claim_admissible_from_claim(row)
+    qed fact
+  }
+  proof handoff_admissible {
+    let row = row handoff parser_to_kernel
+    let fact = rule handoff_admissible_from_handoff(row)
+    qed fact
+  }
+  proof sync_admissible {
+    let row = row sync kernel_merge
+    let fact = rule sync_admissible_from_sync(row)
+    qed fact
+  }
+  proof checkpoint_admissible {
+    let row = row checkpoint core_checkpoint
+    let fact = rule checkpoint_admissible_from_checkpoint(row)
+    qed fact
+  }
+}

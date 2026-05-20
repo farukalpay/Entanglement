@@ -73,6 +73,18 @@ fn unsorted_certificate() -> Certificate {
         gates: vec![],
         decisions: vec![],
         notes: vec![],
+        lanes: vec![],
+        claims: vec![],
+        handoffs: vec![],
+        syncs: vec![],
+        checkpoints: vec![],
+        runtime_ledgers: vec![],
+        runtime_policies: vec![],
+        runtime_sessions: vec![],
+        runtime_tools: vec![],
+        runtime_turns: vec![],
+        runtime_hooks: vec![],
+        runtime_bridges: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],
@@ -103,7 +115,7 @@ fn canonicalization_reorders_non_semantic_rows_and_replays_kernel_check() {
     let rewrite = canonicalize_certificate(&unsorted_certificate())
         .expect("canonicalization should preserve kernel validity");
 
-    assert_eq!(rewrite.name, "canonicalize-certificate-v8");
+    assert_eq!(rewrite.name, "canonicalize-certificate-v9");
     assert_eq!(rewrite.after.dimensions, vec!["a", "b"]);
     assert_eq!(rewrite.after.program_states[0].name, "a");
     assert_eq!(rewrite.after.relation_names, vec!["a_rel", "z_rel"]);

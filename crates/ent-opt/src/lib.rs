@@ -106,6 +106,66 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
         note.tags.sort();
     }
     after
+        .lanes
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .claims
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .handoffs
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .syncs
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for sync in &mut after.syncs {
+        sync.checks.sort();
+    }
+    after
+        .checkpoints
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for checkpoint in &mut after.checkpoints {
+        checkpoint.blockers.sort();
+        checkpoint.next.sort();
+    }
+    after
+        .runtime_ledgers
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for ledger in &mut after.runtime_ledgers {
+        ledger.fields.sort();
+    }
+    after
+        .runtime_policies
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for policy in &mut after.runtime_policies {
+        policy.allow.sort();
+        policy.deny.sort();
+    }
+    after
+        .runtime_sessions
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .runtime_tools
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for tool in &mut after.runtime_tools {
+        tool.reads.sort();
+        tool.writes.sort();
+    }
+    after
+        .runtime_turns
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for turn in &mut after.runtime_turns {
+        turn.tools.sort();
+    }
+    after
+        .runtime_hooks
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    after
+        .runtime_bridges
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    for bridge in &mut after.runtime_bridges {
+        bridge.exposes.sort();
+    }
+    after
         .graphics
         .sort_by(|left, right| left.name.cmp(&right.name));
     for graphics in &mut after.graphics {
@@ -198,7 +258,7 @@ pub fn canonicalize_certificate(cert: &Certificate) -> Result<RewriteProof, Opti
 
     let verification = verify(&after)?;
     Ok(RewriteProof {
-        name: "canonicalize-certificate-v8".to_owned(),
+        name: "canonicalize-certificate-v9".to_owned(),
         before: cert.clone(),
         after,
         verification,

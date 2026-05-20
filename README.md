@@ -3,8 +3,8 @@
 Entanglement is a certificate-native `.ent` language for executable programs
 whose important semantic rows are visible to the compiler and checked by a small
 kernel. The current surface covers resources, effects, external capabilities,
-workspace protocols, machine contracts, tensor training boundaries, and
-graphics workloads.
+workspace protocols, machine contracts, tensor training boundaries, graphics
+workloads, and runtime architecture ledgers.
 
 The language is organized around three layers:
 
@@ -67,7 +67,12 @@ witness satisfaction consumes witness, training, artifact, and executor rows.
 ```bash
 entc check examples/capability-store.ent
 entc plan examples/workspace-protocol.ent --json
+entc plan examples/coordination-ledger.ent --json
+entc check examples/runtime-incident-forge.ent --json
+entc plan examples/runtime-incident-forge.ent
 entc inspect . --markdown --output build/workspace-map.md
+entc native-audit . --markdown --output build/native-audit.md
+entc runtime-audit . --markdown --output build/runtime-ledger.md
 entc apply examples/repo-cleanup.ent --repo path/to/repo --dry-run --json
 entc emit-cert examples/tensor-xor.ent --output build/tensor-xor.cert.json
 entc build examples/cpu-audit.ent --target linux-cpu --output build/cpu-audit.entgraph
@@ -81,9 +86,38 @@ transforms. `entc plan` prints those rows as a reviewable report, while
 `entc apply --dry-run` stages transforms and validators without writing target
 files.
 
+`examples/coordination-ledger.ent` sketches coordination rows for shared
+compiler work: `lane` records ownership and capacity, `claim` reserves a scoped
+write path, `handoff` moves a reviewed item between lanes, `sync` stages merge
+checks, and `checkpoint` records the current lane state. The example is a
+checked contract with matching theorem/proof rows beside each row family.
+
+`examples/runtime-incident-forge.ent` is a larger runtime-contract scenario:
+it models a self-healing incident studio with an append-only runtime ledger,
+approval/sandbox/network policies, sessions, tools, hooks, a local bridge, and
+three bounded turns for triage, patching, and release briefing. The current plan
+summary is:
+
+```text
+PLAN OK world="RuntimeIncidentForge" objectives=1 milestones=3 tasks=4 gates=3 runtime_turns=3 runtime_tools=5
+```
+
 `entc inspect` maps `.ent`, Rust, C, and C++ sources into one deterministic
 report: verified worlds, declaration counts, proof coverage, source symbols,
 include/use edges, call edges, diagnostics, and readiness signals.
+
+`entc native-audit` focuses on Rust, C, and C++ source surfaces. It inventories
+public and exported symbols, foreign ABI boundaries, include/use edges, call
+edges, module-level scores, source markers, native build manifests, and
+suggested build commands. JSON output is suitable for tooling, while Markdown
+creates a reviewable ledger for larger source-port work.
+
+`entc runtime-audit` maps agent-runtime architecture into an Entanglement-owned ledger:
+sessions, turns, task lanes, event storage, tools, execution policy, sandbox
+boundaries, hooks, skills, plugins, MCP bridges, app servers, realtime channels,
+patch engines, and review gates. It is designed for architecture migration work
+where structure, ownership, and flow edges need to be audited without binding
+the report to package names.
 
 Graphics remains a library/runtime capability:
 
@@ -94,9 +128,10 @@ entc bench benchmarks/graphics --modes interpret,ir,native --warmup 1 --iteratio
 
 ## Architecture
 
-The compiler produces certificate schema v8. Protocol rows add objectives,
+The compiler produces certificate schema v9. Protocol rows add objectives,
 milestones, tasks, gates, decisions, and notes to the same proof-carrying path
-used by resources, workspace transforms, and machine contracts. Tensor rows add
+used by resources, workspace transforms, and machine contracts. Runtime rows add
+ledgers, policies, sessions, tools, turns, hooks, and bridges. Tensor rows add
 shape, dtype, gradient, layout, dataset, model, accelerator, training,
 canonical, artifact, lowering, executor, and witness contracts.
 
@@ -107,6 +142,7 @@ canonical, artifact, lowering, executor, and witness contracts.
 | `ent-tensor` | Verify tensor manifests/witnesses and execute checked tensor graphs on CPU |
 | `ent-graphics` | Execute `.ent` graphics libraries and write deterministic images |
 | `ent-transform` | Apply verified workspace transforms |
+| `ent-runtime-audit` | Build Entanglement-owned ledgers for agent-runtime architecture and ownership flows |
 | `ent-cli` | Shared command surface for check, build, plan, apply, tensor bench, render, and doctor |
 
 Design notes and research anchors are in `agent-notes/`.

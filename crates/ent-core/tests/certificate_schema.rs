@@ -5,7 +5,7 @@ use ent_core::{
 use ent_proof::{ProofCertificate, ProofScript, Proposition, PropositionKind};
 
 #[test]
-fn certificate_v8_roundtrips_with_runtime_boundary_contract_fields() {
+fn certificate_v9_roundtrips_with_coordination_contract_fields() {
     let cert = minimal_certificate();
     assert_eq!(cert.version, CERTIFICATE_SCHEMA_VERSION);
 
@@ -28,6 +28,18 @@ fn certificate_v8_roundtrips_with_runtime_boundary_contract_fields() {
     assert!(json.get("gates").is_some());
     assert!(json.get("decisions").is_some());
     assert!(json.get("notes").is_some());
+    assert!(json.get("lanes").is_some());
+    assert!(json.get("claims").is_some());
+    assert!(json.get("handoffs").is_some());
+    assert!(json.get("syncs").is_some());
+    assert!(json.get("checkpoints").is_some());
+    assert!(json.get("runtime_ledgers").is_some());
+    assert!(json.get("runtime_policies").is_some());
+    assert!(json.get("runtime_sessions").is_some());
+    assert!(json.get("runtime_tools").is_some());
+    assert!(json.get("runtime_turns").is_some());
+    assert!(json.get("runtime_hooks").is_some());
+    assert!(json.get("runtime_bridges").is_some());
     assert!(json.get("machines").is_some());
     assert!(json.get("proof_artifacts").is_some());
     assert!(json.get("graphics").is_some());
@@ -96,6 +108,18 @@ fn minimal_certificate() -> Certificate {
         gates: vec![],
         decisions: vec![],
         notes: vec![],
+        lanes: vec![],
+        claims: vec![],
+        handoffs: vec![],
+        syncs: vec![],
+        checkpoints: vec![],
+        runtime_ledgers: vec![],
+        runtime_policies: vec![],
+        runtime_sessions: vec![],
+        runtime_tools: vec![],
+        runtime_turns: vec![],
+        runtime_hooks: vec![],
+        runtime_bridges: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],

@@ -5,6 +5,14 @@ use ent_elab::elaborate_source;
 use ent_graphics::{bench_path, render_file, RenderMode, RenderOptions};
 use ent_inspect::{inspect_path, render_markdown, InspectOptions};
 use ent_kernel::verify;
+use ent_native_audit::{
+    audit_native_path, has_blocking_findings, render_markdown as render_native_markdown,
+    NativeAuditOptions, NativeReadinessStatus,
+};
+use ent_runtime_audit::{
+    audit_runtime_path, has_blocking_findings as has_runtime_blocking_findings,
+    render_markdown as render_runtime_markdown, RuntimeAuditOptions, RuntimeReadinessStatus,
+};
 use ent_tensor::{
     generate_python_binding, run_tensor_benchmark, verify_artifact_manifest, verify_witness,
     TensorBenchOptions,
@@ -167,6 +175,38 @@ enum Command {
         max_file_bytes: Option<u64>,
         #[arg(long)]
         fail_on_diagnostics: bool,
+    },
+    NativeAudit {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        markdown: bool,
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        include_hidden: bool,
+        #[arg(long)]
+        max_file_bytes: Option<u64>,
+        #[arg(long)]
+        exclude_tests: bool,
+        #[arg(long)]
+        fail_on_findings: bool,
+    },
+    RuntimeAudit {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        markdown: bool,
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        include_hidden: bool,
+        #[arg(long)]
+        max_file_bytes: Option<u64>,
+        #[arg(long)]
+        fail_on_findings: bool,
     },
     Doctor {
         #[arg(long)]
@@ -345,12 +385,14 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 println!(
-                    "PLAN OK world={} objectives={} milestones={} tasks={} gates={}",
+                    "PLAN OK world={} objectives={} milestones={} tasks={} gates={} runtime_turns={} runtime_tools={}",
                     result["world"],
                     result["counts"]["objectives"],
                     result["counts"]["milestones"],
                     result["counts"]["tasks"],
-                    result["counts"]["gates"]
+                    result["counts"]["gates"],
+                    result["counts"]["runtime_turns"],
+                    result["counts"]["runtime_tools"]
                 );
             }
         }
@@ -562,6 +604,100 @@ fn main() -> Result<()> {
                 );
             }
         }
+        Command::NativeAudit {
+            path,
+            json,
+            markdown,
+            output,
+            include_hidden,
+            max_file_bytes,
+            exclude_tests,
+            fail_on_findings,
+        } => {
+            if json && markdown {
+                anyhow::bail!("choose either --json or --markdown, not both");
+            }
+            let report = audit_native_path(
+                &path,
+                NativeAuditOptions {
+                    recursive: true,
+                    include_hidden,
+                    follow_symlinks: false,
+                    max_file_bytes: max_file_bytes.or(Some(4 * 1024 * 1024)),
+                    include_tests: !exclude_tests,
+                },
+            )?;
+            let rendered = if json {
+                format!("{}\n", serde_json::to_string_pretty(&report)?)
+            } else if markdown {
+                render_native_markdown(&report)
+            } else {
+                format!(
+                    "NATIVE OK sources={} audited={} status={} public={} exported={} foreign={} findings={}\n",
+                    report.summary.source_file_count,
+                    report.summary.audited_file_count,
+                    native_status_label(report.readiness.status),
+                    report.summary.public_symbol_count,
+                    report.summary.exported_symbol_count,
+                    report.summary.foreign_symbol_count,
+                    report.summary.finding_count
+                )
+            };
+            if let Some(output) = output {
+                write_text(&output, &rendered)?;
+            } else {
+                print!("{rendered}");
+            }
+            if fail_on_findings && has_blocking_findings(&report) {
+                anyhow::bail!("native audit found blocking finding(s)");
+            }
+        }
+        Command::RuntimeAudit {
+            path,
+            json,
+            markdown,
+            output,
+            include_hidden,
+            max_file_bytes,
+            fail_on_findings,
+        } => {
+            if json && markdown {
+                anyhow::bail!("choose either --json or --markdown, not both");
+            }
+            let report = audit_runtime_path(
+                &path,
+                RuntimeAuditOptions {
+                    recursive: true,
+                    include_hidden,
+                    follow_symlinks: false,
+                    max_file_bytes: max_file_bytes.or(Some(4 * 1024 * 1024)),
+                },
+            )?;
+            let rendered = if json {
+                format!("{}\n", serde_json::to_string_pretty(&report)?)
+            } else if markdown {
+                render_runtime_markdown(&report)
+            } else {
+                format!(
+                    "RUNTIME OK sources={} audited={} status={} crates={} components={} flows={} findings={}\n",
+                    report.summary.source_file_count,
+                    report.summary.audited_file_count,
+                    runtime_status_label(report.readiness.status),
+                    report.summary.crate_count,
+                    report.summary.component_count,
+                    report.summary.flow_count,
+                    report.summary.finding_count
+                )
+            };
+            if let Some(output) = output {
+                write_text(&output, &rendered)?;
+            } else {
+                print!("{rendered}");
+            }
+            if fail_on_findings && has_runtime_blocking_findings(&report) {
+                anyhow::bail!("runtime audit found blocking finding(s)");
+            }
+        }
         Command::Doctor { json } => {
             let report = doctor_report();
             if json {
@@ -598,6 +734,10 @@ fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::Verification
     let mut tasks_by_state: BTreeMap<String, usize> = BTreeMap::new();
     let mut tasks_by_milestone: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     let mut gates_by_task: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut claims_by_lane: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut handoffs_by_lane: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut syncs_by_lane: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut checkpoints_by_lane: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     for task in &cert.tasks {
         *tasks_by_state.entry(task.state.clone()).or_default() += 1;
         tasks_by_milestone
@@ -611,6 +751,38 @@ fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::Verification
             .or_default()
             .push(gate.name.as_str());
     }
+    for claim in &cert.claims {
+        claims_by_lane
+            .entry(claim.lane.clone())
+            .or_default()
+            .push(claim.name.as_str());
+    }
+    for handoff in &cert.handoffs {
+        handoffs_by_lane
+            .entry(handoff.from.clone())
+            .or_default()
+            .push(handoff.name.as_str());
+        handoffs_by_lane
+            .entry(handoff.to.clone())
+            .or_default()
+            .push(handoff.name.as_str());
+    }
+    for sync in &cert.syncs {
+        syncs_by_lane
+            .entry(sync.source.clone())
+            .or_default()
+            .push(sync.name.as_str());
+        syncs_by_lane
+            .entry(sync.target.clone())
+            .or_default()
+            .push(sync.name.as_str());
+    }
+    for checkpoint in &cert.checkpoints {
+        checkpoints_by_lane
+            .entry(checkpoint.lane.clone())
+            .or_default()
+            .push(checkpoint.name.as_str());
+    }
     let dependency_edges = cert
         .tasks
         .iter()
@@ -623,6 +795,35 @@ fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::Verification
             })
         })
         .collect::<Vec<_>>();
+    let coordination_edges = cert
+        .claims
+        .iter()
+        .map(|claim| {
+            json!({
+                "kind": "claim",
+                "from": claim.lane,
+                "to": claim.scope,
+                "name": claim.name,
+            })
+        })
+        .chain(cert.handoffs.iter().map(|handoff| {
+            json!({
+                "kind": "handoff",
+                "from": handoff.from,
+                "to": handoff.to,
+                "name": handoff.name,
+                "item": handoff.item,
+            })
+        }))
+        .chain(cert.syncs.iter().map(|sync| {
+            json!({
+                "kind": "sync",
+                "from": sync.source,
+                "to": sync.target,
+                "name": sync.name,
+            })
+        }))
+        .collect::<Vec<_>>();
 
     json!({
         "world": cert.world,
@@ -633,6 +834,18 @@ fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::Verification
             "gates": cert.gates.len(),
             "decisions": cert.decisions.len(),
             "notes": cert.notes.len(),
+            "lanes": cert.lanes.len(),
+            "claims": cert.claims.len(),
+            "handoffs": cert.handoffs.len(),
+            "syncs": cert.syncs.len(),
+            "checkpoints": cert.checkpoints.len(),
+            "runtime_ledgers": cert.runtime_ledgers.len(),
+            "runtime_policies": cert.runtime_policies.len(),
+            "runtime_sessions": cert.runtime_sessions.len(),
+            "runtime_tools": cert.runtime_tools.len(),
+            "runtime_turns": cert.runtime_turns.len(),
+            "runtime_hooks": cert.runtime_hooks.len(),
+            "runtime_bridges": cert.runtime_bridges.len(),
         },
         "objectives": cert.objectives,
         "milestones": cert.milestones,
@@ -640,10 +853,27 @@ fn protocol_report(cert: &ent_core::Certificate, report: &ent_core::Verification
         "gates": cert.gates,
         "decisions": cert.decisions,
         "notes": cert.notes,
+        "lanes": cert.lanes,
+        "claims": cert.claims,
+        "handoffs": cert.handoffs,
+        "syncs": cert.syncs,
+        "checkpoints": cert.checkpoints,
+        "runtime_ledgers": cert.runtime_ledgers,
+        "runtime_policies": cert.runtime_policies,
+        "runtime_sessions": cert.runtime_sessions,
+        "runtime_tools": cert.runtime_tools,
+        "runtime_turns": cert.runtime_turns,
+        "runtime_hooks": cert.runtime_hooks,
+        "runtime_bridges": cert.runtime_bridges,
         "tasks_by_state": tasks_by_state,
         "tasks_by_milestone": tasks_by_milestone,
         "gates_by_task": gates_by_task,
+        "claims_by_lane": claims_by_lane,
+        "handoffs_by_lane": handoffs_by_lane,
+        "syncs_by_lane": syncs_by_lane,
+        "checkpoints_by_lane": checkpoints_by_lane,
         "dependency_edges": dependency_edges,
+        "coordination_edges": coordination_edges,
         "checked_rows": report.checked_rows,
     })
 }
@@ -676,7 +906,10 @@ fn doctor_report() -> Value {
             "bind_python": "entc bind path/to/model.ent --target python --framework pytorch_fx --output build/ent_contract.py",
             "verify_witness": "entc verify-witness path/to/model.ent artifacts/run.witness.json --json",
             "inspect": "entc inspect path/to/workspace --markdown --output build/workspace-map.md",
+            "native_audit": "entc native-audit path/to/workspace --markdown --output build/native-audit.md",
+            "runtime_audit": "entc runtime-audit path/to/workspace --markdown --output build/runtime-ledger.md",
             "plan": "entc plan path/to/work.ent --json",
+            "coordination_plan": "entc plan examples/coordination-ledger.ent --json",
             "apply_dry_run": "entc apply path/to/work.ent --repo . --dry-run --json",
         },
         "editor": {
@@ -685,6 +918,24 @@ fn doctor_report() -> Value {
             "file_extensions": [".ent"],
         }
     })
+}
+
+fn native_status_label(status: NativeReadinessStatus) -> &'static str {
+    match status {
+        NativeReadinessStatus::Ready => "ready",
+        NativeReadinessStatus::NeedsAttention => "needs-attention",
+        NativeReadinessStatus::Blocked => "blocked",
+        NativeReadinessStatus::Empty => "empty",
+    }
+}
+
+fn runtime_status_label(status: RuntimeReadinessStatus) -> &'static str {
+    match status {
+        RuntimeReadinessStatus::Ready => "ready",
+        RuntimeReadinessStatus::NeedsAttention => "needs-attention",
+        RuntimeReadinessStatus::Blocked => "blocked",
+        RuntimeReadinessStatus::Empty => "empty",
+    }
 }
 
 fn load_and_elaborate(path: &Path) -> Result<ent_core::Certificate> {

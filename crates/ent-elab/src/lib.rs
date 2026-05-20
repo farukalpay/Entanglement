@@ -1,15 +1,17 @@
 use ent_core::{
     AbiContract, AcceleratorContract, AdContract, ArtifactContract, BackendContract,
-    BenchmarkContract, CanonicalContract, Certificate, DatasetContract, DecisionContract,
-    Endianness, ExecutorContract, ExternalContract, GateContract, GraphicContract,
-    InstructionContract, InvariantContract, KernelFormula, Label, LoweringContract,
-    MachineContract, MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion,
-    MilestoneContract, ModelContract, NoteContract, ObjectiveContract, ParserContract,
-    ProbabilityContract, ProgramState, ProofArtifact, ProofCertificate, ProverKind, RelationTable,
-    RenderPipelineContract, RenderTargetContract, ResourceAccess, ResourceContract,
-    SelectionContract, StateId, TaskContract, TensorContract, TextReplacement, TrainingContract,
-    TransformContract, TransformTarget, ValidatorContract, WitnessContract, WorkspaceContract,
-    CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
+    BenchmarkContract, CanonicalContract, Certificate, CheckpointContract, ClaimContract,
+    DatasetContract, DecisionContract, Endianness, ExecutorContract, ExternalContract,
+    GateContract, GraphicContract, HandoffContract, InstructionContract, InvariantContract,
+    KernelFormula, Label, LaneContract, LoweringContract, MachineContract, MachineMemoryModel,
+    MemoryContract, MemoryPermission, MemoryRegion, MilestoneContract, ModelContract, NoteContract,
+    ObjectiveContract, ParserContract, ProbabilityContract, ProgramState, ProofArtifact,
+    ProofCertificate, ProverKind, RelationTable, RenderPipelineContract, RenderTargetContract,
+    ResourceAccess, ResourceContract, RuntimeBridgeContract, RuntimeHookContract,
+    RuntimeLedgerContract, RuntimePolicyContract, RuntimeSessionContract, RuntimeToolContract,
+    RuntimeTurnContract, SelectionContract, StateId, SyncContract, TaskContract, TensorContract,
+    TextReplacement, TrainingContract, TransformContract, TransformTarget, ValidatorContract,
+    WitnessContract, WorkspaceContract, CERTIFICATE_SCHEMA_VERSION, MAX_MODAL_DIMENSIONS,
 };
 use ent_parser::{
     parse_world_diagnostic, DimensionKind, EffectAccess, ParseDiagnostic, ParseError,
@@ -172,6 +174,18 @@ pub fn elaborate_ast(ast: &WorldAst) -> Result<Certificate, ElabError> {
         gates: explicit_gates(ast)?,
         decisions: explicit_decisions(ast)?,
         notes: explicit_notes(ast)?,
+        lanes: explicit_lanes(ast)?,
+        claims: explicit_claims(ast)?,
+        handoffs: explicit_handoffs(ast)?,
+        syncs: explicit_syncs(ast)?,
+        checkpoints: explicit_checkpoints(ast)?,
+        runtime_ledgers: explicit_runtime_ledgers(ast)?,
+        runtime_policies: explicit_runtime_policies(ast)?,
+        runtime_sessions: explicit_runtime_sessions(ast)?,
+        runtime_tools: explicit_runtime_tools(ast)?,
+        runtime_turns: explicit_runtime_turns(ast)?,
+        runtime_hooks: explicit_runtime_hooks(ast)?,
+        runtime_bridges: explicit_runtime_bridges(ast)?,
         graphics: explicit_graphics(ast)?,
         render_targets: explicit_render_targets(ast)?,
         render_pipelines: explicit_render_pipelines(ast)?,
@@ -453,6 +467,214 @@ fn explicit_notes(ast: &WorldAst) -> Result<Vec<NoteContract>, ElabError> {
                 scope: decl.scope.clone(),
                 text: decl.text.clone(),
                 tags: decl.tags.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_lanes(ast: &WorldAst) -> Result<Vec<LaneContract>, ElabError> {
+    ast.lanes
+        .iter()
+        .map(|decl| {
+            require_evidence("lane", &decl.name, &decl.evidence)?;
+            Ok(LaneContract {
+                name: decl.name.clone(),
+                owner: decl.owner.clone(),
+                status: decl.status.clone(),
+                purpose: decl.purpose.clone(),
+                capacity: decl.capacity,
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_claims(ast: &WorldAst) -> Result<Vec<ClaimContract>, ElabError> {
+    ast.claims
+        .iter()
+        .map(|decl| {
+            require_evidence("claim", &decl.name, &decl.evidence)?;
+            Ok(ClaimContract {
+                name: decl.name.clone(),
+                lane: decl.lane.clone(),
+                scope: decl.scope.clone(),
+                mode: decl.mode.clone(),
+                policy: decl.policy.clone(),
+                reason: decl.reason.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_handoffs(ast: &WorldAst) -> Result<Vec<HandoffContract>, ElabError> {
+    ast.handoffs
+        .iter()
+        .map(|decl| {
+            require_evidence("handoff", &decl.name, &decl.evidence)?;
+            Ok(HandoffContract {
+                name: decl.name.clone(),
+                from: decl.from.clone(),
+                to: decl.to.clone(),
+                item: decl.item.clone(),
+                state: decl.state.clone(),
+                summary: decl.summary.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_syncs(ast: &WorldAst) -> Result<Vec<SyncContract>, ElabError> {
+    ast.syncs
+        .iter()
+        .map(|decl| {
+            require_evidence("sync", &decl.name, &decl.evidence)?;
+            Ok(SyncContract {
+                name: decl.name.clone(),
+                source: decl.source.clone(),
+                target: decl.target.clone(),
+                strategy: decl.strategy.clone(),
+                checks: decl.checks.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_checkpoints(ast: &WorldAst) -> Result<Vec<CheckpointContract>, ElabError> {
+    ast.checkpoints
+        .iter()
+        .map(|decl| {
+            require_evidence("checkpoint", &decl.name, &decl.evidence)?;
+            Ok(CheckpointContract {
+                name: decl.name.clone(),
+                lane: decl.lane.clone(),
+                state: decl.state.clone(),
+                summary: decl.summary.clone(),
+                blockers: decl.blockers.clone(),
+                next: decl.next.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_ledgers(ast: &WorldAst) -> Result<Vec<RuntimeLedgerContract>, ElabError> {
+    ast.runtime_ledgers
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-ledger", &decl.name, &decl.evidence)?;
+            Ok(RuntimeLedgerContract {
+                name: decl.name.clone(),
+                store: decl.store.clone(),
+                retention: decl.retention.clone(),
+                fields: decl.fields.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_policies(ast: &WorldAst) -> Result<Vec<RuntimePolicyContract>, ElabError> {
+    ast.runtime_policies
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-policy", &decl.name, &decl.evidence)?;
+            Ok(RuntimePolicyContract {
+                name: decl.name.clone(),
+                approval: decl.approval.clone(),
+                sandbox: decl.sandbox.clone(),
+                network: decl.network.clone(),
+                allow: decl.allow.clone(),
+                deny: decl.deny.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_sessions(ast: &WorldAst) -> Result<Vec<RuntimeSessionContract>, ElabError> {
+    ast.runtime_sessions
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-session", &decl.name, &decl.evidence)?;
+            Ok(RuntimeSessionContract {
+                name: decl.name.clone(),
+                owner: decl.owner.clone(),
+                mode: decl.mode.clone(),
+                state: decl.state.clone(),
+                ledger: decl.ledger.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_tools(ast: &WorldAst) -> Result<Vec<RuntimeToolContract>, ElabError> {
+    ast.runtime_tools
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-tool", &decl.name, &decl.evidence)?;
+            Ok(RuntimeToolContract {
+                name: decl.name.clone(),
+                kind: decl.kind.clone(),
+                risk: decl.risk.clone(),
+                policy: decl.policy.clone(),
+                reads: decl.reads.clone(),
+                writes: decl.writes.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_turns(ast: &WorldAst) -> Result<Vec<RuntimeTurnContract>, ElabError> {
+    ast.runtime_turns
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-turn", &decl.name, &decl.evidence)?;
+            Ok(RuntimeTurnContract {
+                name: decl.name.clone(),
+                session: decl.session.clone(),
+                policy: decl.policy.clone(),
+                tools: decl.tools.clone(),
+                budget: decl.budget,
+                objective: decl.objective.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_hooks(ast: &WorldAst) -> Result<Vec<RuntimeHookContract>, ElabError> {
+    ast.runtime_hooks
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-hook", &decl.name, &decl.evidence)?;
+            Ok(RuntimeHookContract {
+                name: decl.name.clone(),
+                event: decl.event.clone(),
+                target: decl.target.clone(),
+                action: decl.action.clone(),
+                evidence: decl.evidence.clone(),
+            })
+        })
+        .collect()
+}
+
+fn explicit_runtime_bridges(ast: &WorldAst) -> Result<Vec<RuntimeBridgeContract>, ElabError> {
+    ast.runtime_bridges
+        .iter()
+        .map(|decl| {
+            require_evidence("runtime-bridge", &decl.name, &decl.evidence)?;
+            Ok(RuntimeBridgeContract {
+                name: decl.name.clone(),
+                kind: decl.kind.clone(),
+                endpoint: decl.endpoint.clone(),
+                exposes: decl.exposes.clone(),
+                policy: decl.policy.clone(),
                 evidence: decl.evidence.clone(),
             })
         })

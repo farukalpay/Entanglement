@@ -1,6 +1,7 @@
 use ent_elab::elaborate_source;
 use ent_transform::{
-    apply_certificate, apply_certificate_with_options, ApplyOptions, TransformError,
+    apply_certificate, apply_certificate_with_options, preview_certificate, ApplyOptions,
+    TransformError,
 };
 use std::fs;
 use std::process::Command;
@@ -378,6 +379,73 @@ fn dry_run_reports_changes_without_writing_targets() {
     assert_eq!(
         fs::read_to_string(repo.path().join("README.md")).expect("readme"),
         "old\nlegacy\nkeep\n"
+    );
+}
+
+#[test]
+fn preview_reports_patch_files_without_writing_targets() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::write(repo.path().join("README.md"), "old\nlegacy\nkeep\n").expect("readme");
+    fs::write(repo.path().join("remove.md"), "# Remove Me\n\narchive\n").expect("doc");
+    let cert = elaborate_source(MARKDOWN_PROGRAM).expect("program elaborates");
+
+    let preview = preview_certificate(&cert, repo.path()).expect("preview succeeds");
+
+    assert!(preview.apply.dry_run);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("README.md")).expect("readme"),
+        "old\nlegacy\nkeep\n"
+    );
+    assert!(repo.path().join("remove.md").exists());
+    assert!(preview
+        .patch_files
+        .iter()
+        .any(|patch| patch.path == "README.md" && patch.text.is_some()));
+    assert!(preview
+        .patch_files
+        .iter()
+        .any(|patch| patch.path == "remove.md" && patch.text.is_some()));
+    let patch = preview.patch.expect("aggregate patch");
+    assert!(patch.contains("diff --git a/README.md b/README.md"));
+    assert!(patch.contains("-old"));
+    assert!(patch.contains("+new"));
+    assert!(patch.contains("deleted file mode 100644"));
+}
+
+#[test]
+fn preview_collects_validator_failure_and_rename_patch() {
+    let repo = tempfile::tempdir().expect("repo");
+    fs::create_dir_all(repo.path().join("OldNameModule")).expect("module");
+    fs::write(
+        repo.path().join("OldNameModule/OldNameThing.cpp"),
+        "class OldNameThing { const char* Name = \"old name runtime\"; };\n",
+    )
+    .expect("cpp");
+    let cert = elaborate_source(TREE_REWRITE_PROGRAM).expect("program elaborates");
+
+    let preview = preview_certificate(&cert, repo.path()).expect("preview succeeds");
+
+    assert!(repo.path().join("OldNameModule/OldNameThing.cpp").exists());
+    assert!(!repo
+        .path()
+        .join("TargetEngineModule/TargetEngineThing.cpp")
+        .exists());
+    assert!(preview
+        .patch_files
+        .iter()
+        .any(|patch| patch.path == "TargetEngineModule/TargetEngineThing.cpp"));
+    assert!(preview
+        .patch
+        .as_deref()
+        .is_some_and(|patch| patch.contains("TargetEngineThing")));
+
+    fs::write(repo.path().join("README.md"), "keep\nlegacy\n").expect("readme");
+    let failing = elaborate_source(FAILING_VALIDATOR_PROGRAM).expect("program elaborates");
+    let failing_preview = preview_certificate(&failing, repo.path()).expect("preview succeeds");
+    assert_ne!(failing_preview.apply.validators[0].status, 0);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("README.md")).expect("readme"),
+        "keep\nlegacy\n"
     );
 }
 

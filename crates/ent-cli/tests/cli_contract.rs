@@ -859,6 +859,49 @@ world PlanRows(role Maintainer, space Workspace) {
 }
 
 #[test]
+fn entc_accepts_runtime_incident_forge_example() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("repo root");
+    let source = repo_root.join("examples/runtime-incident-forge.ent");
+
+    let check = entc_command()
+        .args(["check", source.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc check");
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_report: serde_json::Value =
+        serde_json::from_slice(&check.stdout).expect("check --json report");
+    assert_eq!(check_report["world"], "RuntimeIncidentForge");
+    assert_eq!(check_report["checked_rows"]["runtime_ledgers"], 1);
+    assert_eq!(check_report["checked_rows"]["runtime_policies"], 2);
+    assert_eq!(check_report["checked_rows"]["runtime_tools"], 5);
+    assert_eq!(check_report["checked_rows"]["runtime_turns"], 3);
+    assert_eq!(check_report["checked_rows"]["proofs"], 47);
+
+    let plan = entc_command()
+        .args(["plan", source.to_str().unwrap(), "--json"])
+        .output()
+        .expect("run entc plan");
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan_report: serde_json::Value =
+        serde_json::from_slice(&plan.stdout).expect("plan --json report");
+    assert_eq!(plan_report["counts"]["runtime_bridges"], 1);
+    assert_eq!(plan_report["counts"]["runtime_hooks"], 3);
+    assert_eq!(plan_report["runtime_turns"][1]["name"], "patch_loop");
+    assert_eq!(plan_report["runtime_tools"][3]["kind"], "shell");
+}
+
+#[test]
 fn entc_inspect_reports_workspace_map() {
     let temp = tempfile::tempdir().expect("tempdir");
     let source = temp.path().join("inspectable.ent");

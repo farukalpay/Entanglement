@@ -12,12 +12,15 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 ent-core = { path = "../ent-core" }
+ent-runtime-audit = { path = "../ent-runtime-audit" }
 ent-elab = { path = "../ent-elab" }
 ent-graphics = { path = "../ent-graphics" }
 ent-inspect = { path = "../ent-inspect" }
 ent-kernel = { path = "../ent-kernel" }
+ent-native-audit = { path = "../ent-native-audit" }
 ent-native-gfx = { path = "../ent-native-gfx" }
 ent-opt = { path = "../ent-opt" }
+ent-review = { path = "../ent-review" }
 ent-tensor = { path = "../ent-tensor" }
 ent-transform = { path = "../ent-transform" }
 serde.workspace = true

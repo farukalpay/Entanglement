@@ -41,6 +41,18 @@ pub struct WorldAst {
     pub gates: Vec<GateDecl>,
     pub decisions: Vec<DecisionDecl>,
     pub notes: Vec<NoteDecl>,
+    pub lanes: Vec<LaneDecl>,
+    pub claims: Vec<ClaimDecl>,
+    pub handoffs: Vec<HandoffDecl>,
+    pub syncs: Vec<SyncDecl>,
+    pub checkpoints: Vec<CheckpointDecl>,
+    pub runtime_ledgers: Vec<RuntimeLedgerDecl>,
+    pub runtime_policies: Vec<RuntimePolicyDecl>,
+    pub runtime_sessions: Vec<RuntimeSessionDecl>,
+    pub runtime_tools: Vec<RuntimeToolDecl>,
+    pub runtime_turns: Vec<RuntimeTurnDecl>,
+    pub runtime_hooks: Vec<RuntimeHookDecl>,
+    pub runtime_bridges: Vec<RuntimeBridgeDecl>,
     pub graphics: Vec<GraphicsDecl>,
     pub render_targets: Vec<RenderTargetDecl>,
     pub render_pipelines: Vec<RenderPipelineDecl>,
@@ -314,6 +326,142 @@ pub struct NoteDecl {
     pub scope: String,
     pub text: String,
     pub tags: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LaneDecl {
+    pub name: String,
+    pub owner: String,
+    pub status: String,
+    pub purpose: String,
+    pub capacity: u32,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimDecl {
+    pub name: String,
+    pub lane: String,
+    pub scope: String,
+    pub mode: String,
+    pub policy: String,
+    pub reason: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HandoffDecl {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub item: String,
+    pub state: String,
+    pub summary: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncDecl {
+    pub name: String,
+    pub source: String,
+    pub target: String,
+    pub strategy: String,
+    pub checks: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckpointDecl {
+    pub name: String,
+    pub lane: String,
+    pub state: String,
+    pub summary: String,
+    pub blockers: Vec<String>,
+    pub next: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeLedgerDecl {
+    pub name: String,
+    pub store: String,
+    pub retention: String,
+    pub fields: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimePolicyDecl {
+    pub name: String,
+    pub approval: String,
+    pub sandbox: String,
+    pub network: String,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeSessionDecl {
+    pub name: String,
+    pub owner: String,
+    pub mode: String,
+    pub state: String,
+    pub ledger: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeToolDecl {
+    pub name: String,
+    pub kind: String,
+    pub risk: String,
+    pub policy: String,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeTurnDecl {
+    pub name: String,
+    pub session: String,
+    pub policy: String,
+    pub tools: Vec<String>,
+    pub budget: u32,
+    pub objective: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeHookDecl {
+    pub name: String,
+    pub event: String,
+    pub target: String,
+    pub action: String,
+    pub evidence: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeBridgeDecl {
+    pub name: String,
+    pub kind: String,
+    pub endpoint: String,
+    pub exposes: Vec<String>,
+    pub policy: String,
     pub evidence: String,
     pub span: SourceSpan,
 }
@@ -641,6 +789,18 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         gates: vec![],
         decisions: vec![],
         notes: vec![],
+        lanes: vec![],
+        claims: vec![],
+        handoffs: vec![],
+        syncs: vec![],
+        checkpoints: vec![],
+        runtime_ledgers: vec![],
+        runtime_policies: vec![],
+        runtime_sessions: vec![],
+        runtime_tools: vec![],
+        runtime_turns: vec![],
+        runtime_hooks: vec![],
+        runtime_bridges: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],
@@ -736,6 +896,49 @@ pub fn parse_world_diagnostic(source: &str) -> Result<WorldAst, ParseDiagnostic>
         } else if let Some(rest) = line.strip_prefix("note ") {
             ast.notes
                 .push(parse_note(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("lane ") {
+            ast.lanes
+                .push(parse_lane(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("claim ") {
+            ast.claims
+                .push(parse_claim(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("handoff ") {
+            ast.handoffs
+                .push(parse_handoff(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("sync ") {
+            ast.syncs
+                .push(parse_sync(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("checkpoint ") {
+            ast.checkpoints
+                .push(parse_checkpoint(rest, span).map_err(|error| diagnostic(error, span, line))?);
+        } else if let Some(rest) = line.strip_prefix("runtime-ledger ") {
+            ast.runtime_ledgers.push(
+                parse_runtime_ledger(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-policy ") {
+            ast.runtime_policies.push(
+                parse_runtime_policy(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-session ") {
+            ast.runtime_sessions.push(
+                parse_runtime_session(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-tool ") {
+            ast.runtime_tools.push(
+                parse_runtime_tool(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-turn ") {
+            ast.runtime_turns.push(
+                parse_runtime_turn(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-hook ") {
+            ast.runtime_hooks.push(
+                parse_runtime_hook(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
+        } else if let Some(rest) = line.strip_prefix("runtime-bridge ") {
+            ast.runtime_bridges.push(
+                parse_runtime_bridge(rest, span).map_err(|error| diagnostic(error, span, line))?,
+            );
         } else if let Some(rest) = line.strip_prefix("graphics ") {
             let (graphics, consumed) = parse_graphics_block(rest, span, &mut lines)
                 .map_err(|error| diagnostic(error, span, line))?;
@@ -972,14 +1175,35 @@ fn matching_brace(source: &str, open: usize) -> Option<usize> {
 fn strip_comments_preserve_width(source: &str) -> String {
     source
         .lines()
-        .map(|line| {
-            line.split_once("//").map_or_else(
-                || line.to_owned(),
-                |(head, tail)| format!("{head}{}", " ".repeat(tail.len() + 2)),
-            )
-        })
+        .map(strip_comment_from_line_preserve_width)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn strip_comment_from_line_preserve_width(line: &str) -> String {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((idx, ch)) = chars.next() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '/' if matches!(chars.peek(), Some((_, '/'))) => {
+                return format!("{}{}", &line[..idx], " ".repeat(line.len() - idx));
+            }
+            _ => {}
+        }
+    }
+    line.to_owned()
 }
 
 fn parse_header(header: &str) -> Result<(String, Vec<DimensionDecl>), ParseError> {
@@ -1668,6 +1892,535 @@ fn parse_note(rest: &str, span: SourceSpan) -> Result<NoteDecl, ParseError> {
         scope: scope.to_owned(),
         text,
         tags: parse_name_list(tags.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_lane(rest: &str, span: SourceSpan) -> Result<LaneDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, capacity) = head
+        .rsplit_once(" capacity ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, purpose) = split_quoted_tail(head, " purpose ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "owner", rest)?;
+    let owner = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "status", rest)?;
+    let status = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let capacity = capacity
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || owner.is_empty()
+        || status.is_empty()
+        || purpose.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(LaneDecl {
+        name: name.to_owned(),
+        owner: owner.to_owned(),
+        status: status.to_owned(),
+        purpose,
+        capacity,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_claim(rest: &str, span: SourceSpan) -> Result<ClaimDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, reason) = split_quoted_tail(head, " reason ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "lane", rest)?;
+    let lane = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "scope", rest)?;
+    let scope = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "mode", rest)?;
+    let mode = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "policy", rest)?;
+    let policy = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || lane.is_empty()
+        || scope.is_empty()
+        || mode.is_empty()
+        || policy.is_empty()
+        || reason.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(ClaimDecl {
+        name: name.to_owned(),
+        lane: lane.to_owned(),
+        scope: scope.to_owned(),
+        mode: mode.to_owned(),
+        policy: policy.to_owned(),
+        reason,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_handoff(rest: &str, span: SourceSpan) -> Result<HandoffDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, summary) = split_quoted_tail(head, " summary ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "from", rest)?;
+    let from = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "to", rest)?;
+    let to = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "item", rest)?;
+    let item = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "state", rest)?;
+    let state = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || from.is_empty()
+        || to.is_empty()
+        || item.is_empty()
+        || state.is_empty()
+        || summary.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(HandoffDecl {
+        name: name.to_owned(),
+        from: from.to_owned(),
+        to: to.to_owned(),
+        item: item.to_owned(),
+        state: state.to_owned(),
+        summary,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_sync(rest: &str, span: SourceSpan) -> Result<SyncDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, checks) = head
+        .rsplit_once(" checks ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "source", rest)?;
+    let source = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "target", rest)?;
+    let target = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "strategy", rest)?;
+    let strategy = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || source.is_empty()
+        || target.is_empty()
+        || strategy.is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(SyncDecl {
+        name: name.to_owned(),
+        source: source.to_owned(),
+        target: target.to_owned(),
+        strategy: strategy.to_owned(),
+        checks: parse_name_list(checks.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_checkpoint(rest: &str, span: SourceSpan) -> Result<CheckpointDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, next) = head
+        .rsplit_once(" next ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, blockers) = head
+        .rsplit_once(" blockers ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, summary) = split_quoted_tail(head, " summary ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "lane", rest)?;
+    let lane = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "state", rest)?;
+    let state = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || lane.is_empty()
+        || state.is_empty()
+        || summary.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(CheckpointDecl {
+        name: name.to_owned(),
+        lane: lane.to_owned(),
+        state: state.to_owned(),
+        summary,
+        blockers: parse_name_list(blockers.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        next: parse_name_list(next.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_ledger(rest: &str, span: SourceSpan) -> Result<RuntimeLedgerDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, fields) = head
+        .rsplit_once(" fields ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, retention) = split_quoted_tail(head, " retention ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "store", rest)?;
+    let store = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || store.is_empty()
+        || retention.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeLedgerDecl {
+        name: name.to_owned(),
+        store: store.to_owned(),
+        retention,
+        fields: parse_name_list(fields.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_policy(rest: &str, span: SourceSpan) -> Result<RuntimePolicyDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, deny) = head
+        .rsplit_once(" deny ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, allow) = head
+        .rsplit_once(" allow ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "approval", rest)?;
+    let approval = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "sandbox", rest)?;
+    let sandbox = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "network", rest)?;
+    let network = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || approval.is_empty()
+        || sandbox.is_empty()
+        || network.is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimePolicyDecl {
+        name: name.to_owned(),
+        approval: approval.to_owned(),
+        sandbox: sandbox.to_owned(),
+        network: network.to_owned(),
+        allow: parse_name_list(allow.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        deny: parse_name_list(deny.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_session(rest: &str, span: SourceSpan) -> Result<RuntimeSessionDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "owner", rest)?;
+    let owner = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "mode", rest)?;
+    let mode = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "state", rest)?;
+    let state = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "ledger", rest)?;
+    let ledger = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || owner.is_empty()
+        || mode.is_empty()
+        || state.is_empty()
+        || ledger.is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeSessionDecl {
+        name: name.to_owned(),
+        owner: owner.to_owned(),
+        mode: mode.to_owned(),
+        state: state.to_owned(),
+        ledger: ledger.to_owned(),
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_tool(rest: &str, span: SourceSpan) -> Result<RuntimeToolDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, writes) = head
+        .rsplit_once(" writes ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, reads) = head
+        .rsplit_once(" reads ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "kind", rest)?;
+    let kind = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "risk", rest)?;
+    let risk = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "policy", rest)?;
+    let policy = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || kind.is_empty()
+        || risk.is_empty()
+        || policy.is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeToolDecl {
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        risk: risk.to_owned(),
+        policy: policy.to_owned(),
+        reads: parse_argv(reads.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        writes: parse_argv(writes.trim()).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_turn(rest: &str, span: SourceSpan) -> Result<RuntimeTurnDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, objective) = split_quoted_tail(head, " objective ")?;
+    let (head, budget) = head
+        .rsplit_once(" budget ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "session", rest)?;
+    let session = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "policy", rest)?;
+    let policy = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "tools", rest)?;
+    let tools = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let budget = budget
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || session.is_empty()
+        || policy.is_empty()
+        || objective.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeTurnDecl {
+        name: name.to_owned(),
+        session: session.to_owned(),
+        policy: policy.to_owned(),
+        tools: parse_name_list(tools).map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        budget,
+        objective,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_hook(rest: &str, span: SourceSpan) -> Result<RuntimeHookDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, action) = split_quoted_tail(head, " action ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "event", rest)?;
+    let event = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "target", rest)?;
+    let target = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || event.is_empty()
+        || target.is_empty()
+        || action.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeHookDecl {
+        name: name.to_owned(),
+        event: event.to_owned(),
+        target: target.to_owned(),
+        action,
+        evidence: evidence.trim().to_owned(),
+        span,
+    })
+}
+
+fn parse_runtime_bridge(rest: &str, span: SourceSpan) -> Result<RuntimeBridgeDecl, ParseError> {
+    let (head, evidence) = rest
+        .rsplit_once(" evidence ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, exposes) = head
+        .rsplit_once(" exposes ")
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    let (head, endpoint) = split_quoted_tail(head, " endpoint ")?;
+    let mut words = head.split_whitespace();
+    let name = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "kind", rest)?;
+    let kind = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    expect_word(words.next(), "policy", rest)?;
+    let policy = words
+        .next()
+        .ok_or_else(|| ParseError::Malformed(rest.to_owned()))?;
+    if words.next().is_some()
+        || name.is_empty()
+        || kind.is_empty()
+        || policy.is_empty()
+        || endpoint.trim().is_empty()
+        || evidence.trim().is_empty()
+    {
+        return Err(ParseError::Malformed(rest.to_owned()));
+    }
+    Ok(RuntimeBridgeDecl {
+        name: name.to_owned(),
+        kind: kind.to_owned(),
+        endpoint,
+        exposes: parse_name_list(exposes.trim())
+            .map_err(|_| ParseError::Malformed(rest.to_owned()))?,
+        policy: policy.to_owned(),
         evidence: evidence.trim().to_owned(),
         span,
     })

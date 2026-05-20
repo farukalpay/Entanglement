@@ -1,12 +1,12 @@
 use ent_core::{
-    AbiContract, AdContract, BackendContract, BenchmarkContract, Certificate, DecisionContract,
-    Endianness, GateContract, GraphicContract, InstabilityKind, InstructionContract, KernelFormula,
-    Label, MachineContract, MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion,
-    MilestoneContract, NoteContract, ObjectiveContract, ParserContract, ProgramState,
-    ProofArtifact, ProofCertificate, ProverKind, RelationTable, RenderPipelineContract,
-    RenderTargetContract, ResourceAccess, SelectionContract, StateId, TaskContract,
-    TransformContract, TransformTarget, ValidatorContract, WorkspaceContract,
-    CERTIFICATE_SCHEMA_VERSION,
+    AbiContract, AdContract, BackendContract, BenchmarkContract, Certificate, CheckpointContract,
+    ClaimContract, DecisionContract, Endianness, GateContract, GraphicContract, HandoffContract,
+    InstabilityKind, InstructionContract, KernelFormula, Label, LaneContract, MachineContract,
+    MachineMemoryModel, MemoryContract, MemoryPermission, MemoryRegion, MilestoneContract,
+    NoteContract, ObjectiveContract, ParserContract, ProgramState, ProofArtifact, ProofCertificate,
+    ProverKind, RelationTable, RenderPipelineContract, RenderTargetContract, ResourceAccess,
+    SelectionContract, StateId, SyncContract, TaskContract, TransformContract, TransformTarget,
+    ValidatorContract, WorkspaceContract, CERTIFICATE_SCHEMA_VERSION,
 };
 use ent_kernel::{verify, KernelError};
 use ent_proof::{
@@ -67,6 +67,18 @@ fn accepting_certificate() -> Certificate {
         gates: vec![],
         decisions: vec![],
         notes: vec![],
+        lanes: vec![],
+        claims: vec![],
+        handoffs: vec![],
+        syncs: vec![],
+        checkpoints: vec![],
+        runtime_ledgers: vec![],
+        runtime_policies: vec![],
+        runtime_sessions: vec![],
+        runtime_tools: vec![],
+        runtime_turns: vec![],
+        runtime_hooks: vec![],
+        runtime_bridges: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],
@@ -458,6 +470,152 @@ fn accepts_proved_protocol_contracts() {
 }
 
 #[test]
+fn accepts_proved_coordination_contracts() {
+    let mut cert = accepting_certificate();
+    cert.lanes.push(LaneContract {
+        name: "core".into(),
+        owner: "maintainer".into(),
+        status: "active".into(),
+        purpose: "Protect central compiler work".into(),
+        capacity: 2,
+        evidence: "core_lane_record".into(),
+    });
+    cert.lanes.push(LaneContract {
+        name: "review".into(),
+        owner: "maintainer".into(),
+        status: "review".into(),
+        purpose: "Hold reviewed changes before release".into(),
+        capacity: 2,
+        evidence: "review_lane_record".into(),
+    });
+    cert.claims.push(ClaimContract {
+        name: "parser_claim".into(),
+        lane: "core".into(),
+        scope: "file:\"crates/ent-parser/src/lib.rs\"".into(),
+        mode: "write".into(),
+        policy: "exclusive".into(),
+        reason: "Parser grammar update".into(),
+        evidence: "parser_claim_record".into(),
+    });
+    cert.handoffs.push(HandoffContract {
+        name: "parser_to_review".into(),
+        from: "core".into(),
+        to: "review".into(),
+        item: "claim:parser_claim".into(),
+        state: "proposed".into(),
+        summary: "Parser rows are ready for review".into(),
+        evidence: "parser_handoff_record".into(),
+    });
+    cert.syncs.push(SyncContract {
+        name: "kernel_merge".into(),
+        source: "core".into(),
+        target: "review".into(),
+        strategy: "staged".into(),
+        checks: vec!["record:coordination_checks".into()],
+        evidence: "kernel_sync_record".into(),
+    });
+    cert.checkpoints.push(CheckpointContract {
+        name: "core_checkpoint".into(),
+        lane: "core".into(),
+        state: "green".into(),
+        summary: "Parser and kernel rows agree".into(),
+        blockers: vec![],
+        next: vec!["sync:kernel_merge".into()],
+        evidence: "core_checkpoint_record".into(),
+    });
+    cert.proofs.push(proof(
+        "core_lane_safe",
+        PropositionKind::LaneAdmissible,
+        "core",
+        RowKind::Lane,
+        PrimitiveRule::LaneAdmissibleFromLane,
+    ));
+    cert.proofs.push(proof(
+        "review_lane_safe",
+        PropositionKind::LaneAdmissible,
+        "review",
+        RowKind::Lane,
+        PrimitiveRule::LaneAdmissibleFromLane,
+    ));
+    cert.proofs.push(proof(
+        "parser_claim_safe",
+        PropositionKind::ClaimAdmissible,
+        "parser_claim",
+        RowKind::Claim,
+        PrimitiveRule::ClaimAdmissibleFromClaim,
+    ));
+    cert.proofs.push(proof(
+        "parser_handoff_safe",
+        PropositionKind::HandoffAdmissible,
+        "parser_to_review",
+        RowKind::Handoff,
+        PrimitiveRule::HandoffAdmissibleFromHandoff,
+    ));
+    cert.proofs.push(proof(
+        "kernel_sync_safe",
+        PropositionKind::SyncAdmissible,
+        "kernel_merge",
+        RowKind::Sync,
+        PrimitiveRule::SyncAdmissibleFromSync,
+    ));
+    cert.proofs.push(proof(
+        "checkpoint_safe",
+        PropositionKind::CheckpointAdmissible,
+        "core_checkpoint",
+        RowKind::Checkpoint,
+        PrimitiveRule::CheckpointAdmissibleFromCheckpoint,
+    ));
+
+    let report = verify(&cert).expect("proved coordination rows should verify");
+    assert_eq!(report.checked_rows.lanes, 2);
+    assert_eq!(report.checked_rows.claims, 1);
+    assert_eq!(report.checked_rows.handoffs, 1);
+    assert_eq!(report.checked_rows.syncs, 1);
+    assert_eq!(report.checked_rows.checkpoints, 1);
+    assert_eq!(report.checked_rows.proofs, 6);
+}
+
+#[test]
+fn rejects_overlapping_exclusive_claims() {
+    let mut cert = accepting_certificate();
+    cert.lanes.push(LaneContract {
+        name: "core".into(),
+        owner: "maintainer".into(),
+        status: "active".into(),
+        purpose: "Protect central compiler work".into(),
+        capacity: 4,
+        evidence: "core_lane_record".into(),
+    });
+    cert.claims.push(ClaimContract {
+        name: "parser_file".into(),
+        lane: "core".into(),
+        scope: "file:\"src/parser.rs\"".into(),
+        mode: "write".into(),
+        policy: "exclusive".into(),
+        reason: "Parser file update".into(),
+        evidence: "parser_file_claim".into(),
+    });
+    cert.claims.push(ClaimContract {
+        name: "parser_dir".into(),
+        lane: "core".into(),
+        scope: "dir:\"src\"".into(),
+        mode: "write".into(),
+        policy: "shared".into(),
+        reason: "Source directory update".into(),
+        evidence: "parser_dir_claim".into(),
+    });
+
+    let err = verify(&cert).expect_err("overlapping exclusive claims should be rejected");
+    assert!(matches!(
+        err,
+        KernelError::Instability {
+            kind: InstabilityKind::ClaimInadmissible,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn accepts_proved_graphics_contracts() {
     let mut cert = accepting_certificate();
     cert.graphics.push(GraphicContract {
@@ -816,6 +974,18 @@ fn rejects_public_restriction_that_deletes_required_factor_midpoint() {
         gates: vec![],
         decisions: vec![],
         notes: vec![],
+        lanes: vec![],
+        claims: vec![],
+        handoffs: vec![],
+        syncs: vec![],
+        checkpoints: vec![],
+        runtime_ledgers: vec![],
+        runtime_policies: vec![],
+        runtime_sessions: vec![],
+        runtime_tools: vec![],
+        runtime_turns: vec![],
+        runtime_hooks: vec![],
+        runtime_bridges: vec![],
         graphics: vec![],
         render_targets: vec![],
         render_pipelines: vec![],

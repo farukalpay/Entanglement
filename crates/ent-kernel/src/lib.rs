@@ -89,6 +89,18 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.gates += check_gates(cert)?;
     checked.decisions += check_decisions(cert)?;
     checked.notes += check_notes(cert)?;
+    checked.lanes += check_lanes(cert)?;
+    checked.claims += check_claims(cert)?;
+    checked.handoffs += check_handoffs(cert)?;
+    checked.syncs += check_syncs(cert)?;
+    checked.checkpoints += check_checkpoints(cert)?;
+    checked.runtime_ledgers += check_runtime_ledgers(cert)?;
+    checked.runtime_policies += check_runtime_policies(cert)?;
+    checked.runtime_sessions += check_runtime_sessions(cert)?;
+    checked.runtime_tools += check_runtime_tools(cert)?;
+    checked.runtime_turns += check_runtime_turns(cert)?;
+    checked.runtime_hooks += check_runtime_hooks(cert)?;
+    checked.runtime_bridges += check_runtime_bridges(cert)?;
     checked.graphics += check_graphics(cert)?;
     checked.render_targets += check_render_targets(cert)?;
     checked.render_pipelines += check_render_pipelines(cert)?;
@@ -111,6 +123,7 @@ pub fn verify(cert: &Certificate) -> Result<VerificationReport, KernelError> {
     checked.proofs += check_proofs(cert)?;
     check_workspace_proof_obligations(cert)?;
     check_protocol_proof_obligations(cert)?;
+    check_runtime_architecture_proof_obligations(cert)?;
     check_graphics_proof_obligations(cert)?;
     check_tensor_proof_obligations(cert)?;
     check_runtime_boundary_proof_obligations(cert)?;
@@ -1314,6 +1327,734 @@ fn check_notes(cert: &Certificate) -> Result<usize, KernelError> {
         }
     }
     Ok(cert.notes.len())
+}
+
+fn check_lanes(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for lane in &cert.lanes {
+        require_evidence("lane", &lane.name, &lane.evidence)?;
+        if !names.insert(lane.name.as_str()) {
+            return fail(
+                InstabilityKind::LaneInadmissible,
+                "lane names must be unique",
+                vec![lane.name.clone()],
+            );
+        }
+        if !valid_identifier(&lane.name)
+            || !valid_identifier(&lane.owner)
+            || lane.purpose.trim().is_empty()
+        {
+            return fail(
+                InstabilityKind::LaneInadmissible,
+                "lane must have a stable name, owner, and purpose",
+                vec![lane.name.clone()],
+            );
+        }
+        if !matches!(
+            lane.status.as_str(),
+            "planned" | "active" | "paused" | "review" | "blocked" | "done" | "dropped"
+        ) {
+            return fail(
+                InstabilityKind::LaneInadmissible,
+                "lane status is not registered",
+                vec![lane.name.clone(), lane.status.clone()],
+            );
+        }
+        if lane.capacity == 0 || lane.capacity > 64 {
+            return fail(
+                InstabilityKind::LaneInadmissible,
+                "lane capacity must be between 1 and 64",
+                vec![lane.name.clone(), lane.capacity.to_string()],
+            );
+        }
+    }
+    Ok(cert.lanes.len())
+}
+
+fn check_claims(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let lane_names = cert
+        .lanes
+        .iter()
+        .map(|lane| lane.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut lane_capacity = cert
+        .lanes
+        .iter()
+        .map(|lane| (lane.name.as_str(), lane.capacity as usize))
+        .collect::<IndexMap<_, _>>();
+    let mut lane_claims: IndexMap<&str, usize> = IndexMap::new();
+    let mut names = IndexSet::new();
+    let mut parsed_scopes = Vec::new();
+    for claim in &cert.claims {
+        require_evidence("claim", &claim.name, &claim.evidence)?;
+        if !names.insert(claim.name.as_str()) {
+            return fail(
+                InstabilityKind::ClaimInadmissible,
+                "claim names must be unique",
+                vec![claim.name.clone()],
+            );
+        }
+        if !valid_identifier(&claim.name) || claim.reason.trim().is_empty() {
+            return fail(
+                InstabilityKind::ClaimInadmissible,
+                "claim must have a stable name and reason",
+                vec![claim.name.clone()],
+            );
+        }
+        if !lane_names.contains(claim.lane.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "claim references an undeclared lane",
+                vec![claim.name.clone(), claim.lane.clone()],
+            );
+        }
+        if !matches!(claim.mode.as_str(), "read" | "write" | "review" | "observe") {
+            return fail(
+                InstabilityKind::ClaimInadmissible,
+                "claim mode is not registered",
+                vec![claim.name.clone(), claim.mode.clone()],
+            );
+        }
+        if !matches!(claim.policy.as_str(), "shared" | "exclusive" | "advisory") {
+            return fail(
+                InstabilityKind::ClaimInadmissible,
+                "claim policy is not registered",
+                vec![claim.name.clone(), claim.policy.clone()],
+            );
+        }
+        let parsed_scope =
+            parse_claim_scope(&claim.scope, &scopes).ok_or_else(|| KernelError::Instability {
+                kind: InstabilityKind::ClaimInadmissible,
+                message: "claim scope is not registered".to_owned(),
+                evidence: vec![claim.name.clone(), claim.scope.clone()],
+            })?;
+        if claim.mode != "observe" {
+            *lane_claims.entry(claim.lane.as_str()).or_default() += 1;
+        }
+        parsed_scopes.push((claim, parsed_scope));
+    }
+    for (lane, count) in lane_claims {
+        let capacity = lane_capacity.shift_remove(lane).unwrap_or(0);
+        if count > capacity {
+            return fail(
+                InstabilityKind::ClaimInadmissible,
+                "lane capacity is exceeded by active claims",
+                vec![lane.to_owned(), count.to_string(), capacity.to_string()],
+            );
+        }
+    }
+    for idx in 0..parsed_scopes.len() {
+        for other_idx in idx + 1..parsed_scopes.len() {
+            let (left, left_scope) = &parsed_scopes[idx];
+            let (right, right_scope) = &parsed_scopes[other_idx];
+            if claim_scopes_overlap(left_scope, right_scope)
+                && (left.policy == "exclusive" || right.policy == "exclusive")
+                && (left.mode != "observe" || right.mode != "observe")
+            {
+                return fail(
+                    InstabilityKind::ClaimInadmissible,
+                    "exclusive claim scopes must not overlap",
+                    vec![left.name.clone(), right.name.clone(), left.scope.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.claims.len())
+}
+
+fn check_handoffs(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let lane_names = cert
+        .lanes
+        .iter()
+        .map(|lane| lane.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for handoff in &cert.handoffs {
+        require_evidence("handoff", &handoff.name, &handoff.evidence)?;
+        if !names.insert(handoff.name.as_str()) {
+            return fail(
+                InstabilityKind::HandoffInadmissible,
+                "handoff names must be unique",
+                vec![handoff.name.clone()],
+            );
+        }
+        if !valid_identifier(&handoff.name) || handoff.summary.trim().is_empty() {
+            return fail(
+                InstabilityKind::HandoffInadmissible,
+                "handoff must have a stable name and summary",
+                vec![handoff.name.clone()],
+            );
+        }
+        if !lane_names.contains(handoff.from.as_str()) || !lane_names.contains(handoff.to.as_str())
+        {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "handoff references an undeclared lane",
+                vec![
+                    handoff.name.clone(),
+                    handoff.from.clone(),
+                    handoff.to.clone(),
+                ],
+            );
+        }
+        if handoff.from == handoff.to {
+            return fail(
+                InstabilityKind::HandoffInadmissible,
+                "handoff endpoints must be distinct",
+                vec![handoff.name.clone(), handoff.from.clone()],
+            );
+        }
+        if !coordination_item_exists(&handoff.item, &scopes) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "handoff item is not registered",
+                vec![handoff.name.clone(), handoff.item.clone()],
+            );
+        }
+        if !matches!(
+            handoff.state.as_str(),
+            "proposed" | "accepted" | "returned" | "applied" | "closed"
+        ) {
+            return fail(
+                InstabilityKind::HandoffInadmissible,
+                "handoff state is not registered",
+                vec![handoff.name.clone(), handoff.state.clone()],
+            );
+        }
+    }
+    Ok(cert.handoffs.len())
+}
+
+fn check_syncs(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let lane_names = cert
+        .lanes
+        .iter()
+        .map(|lane| lane.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for sync in &cert.syncs {
+        require_evidence("sync", &sync.name, &sync.evidence)?;
+        if !names.insert(sync.name.as_str()) {
+            return fail(
+                InstabilityKind::SyncInadmissible,
+                "sync names must be unique",
+                vec![sync.name.clone()],
+            );
+        }
+        if !valid_identifier(&sync.name) {
+            return fail(
+                InstabilityKind::SyncInadmissible,
+                "sync name must be stable",
+                vec![sync.name.clone()],
+            );
+        }
+        if !lane_names.contains(sync.source.as_str()) || !lane_names.contains(sync.target.as_str())
+        {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "sync references an undeclared lane",
+                vec![sync.name.clone(), sync.source.clone(), sync.target.clone()],
+            );
+        }
+        if sync.source == sync.target {
+            return fail(
+                InstabilityKind::SyncInadmissible,
+                "sync endpoints must be distinct",
+                vec![sync.name.clone(), sync.source.clone()],
+            );
+        }
+        if !matches!(
+            sync.strategy.as_str(),
+            "staged" | "linear" | "parallel" | "rebase" | "squash" | "hold"
+        ) {
+            return fail(
+                InstabilityKind::SyncInadmissible,
+                "sync strategy is not registered",
+                vec![sync.name.clone(), sync.strategy.clone()],
+            );
+        }
+        if sync.checks.is_empty() {
+            return fail(
+                InstabilityKind::SyncInadmissible,
+                "sync must name at least one check",
+                vec![sync.name.clone()],
+            );
+        }
+        for check in &sync.checks {
+            if !coordination_item_exists(check, &scopes) && !record_ref_exists(check) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "sync check is not registered",
+                    vec![sync.name.clone(), check.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.syncs.len())
+}
+
+fn check_checkpoints(cert: &Certificate) -> Result<usize, KernelError> {
+    let scopes = protocol_scopes(cert);
+    let lane_names = cert
+        .lanes
+        .iter()
+        .map(|lane| lane.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for checkpoint in &cert.checkpoints {
+        require_evidence("checkpoint", &checkpoint.name, &checkpoint.evidence)?;
+        if !names.insert(checkpoint.name.as_str()) {
+            return fail(
+                InstabilityKind::CheckpointInadmissible,
+                "checkpoint names must be unique",
+                vec![checkpoint.name.clone()],
+            );
+        }
+        if !valid_identifier(&checkpoint.name) || checkpoint.summary.trim().is_empty() {
+            return fail(
+                InstabilityKind::CheckpointInadmissible,
+                "checkpoint must have a stable name and summary",
+                vec![checkpoint.name.clone()],
+            );
+        }
+        if !lane_names.contains(checkpoint.lane.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "checkpoint references an undeclared lane",
+                vec![checkpoint.name.clone(), checkpoint.lane.clone()],
+            );
+        }
+        if !matches!(
+            checkpoint.state.as_str(),
+            "green" | "yellow" | "red" | "blocked" | "done"
+        ) {
+            return fail(
+                InstabilityKind::CheckpointInadmissible,
+                "checkpoint state is not registered",
+                vec![checkpoint.name.clone(), checkpoint.state.clone()],
+            );
+        }
+        for blocker in &checkpoint.blockers {
+            if !coordination_item_exists(blocker, &scopes) && !record_ref_exists(blocker) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "checkpoint blocker is not registered",
+                    vec![checkpoint.name.clone(), blocker.clone()],
+                );
+            }
+        }
+        for next in &checkpoint.next {
+            if !coordination_item_exists(next, &scopes) && !record_ref_exists(next) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "checkpoint next item is not registered",
+                    vec![checkpoint.name.clone(), next.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.checkpoints.len())
+}
+
+fn check_runtime_ledgers(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for ledger in &cert.runtime_ledgers {
+        require_evidence("runtime-ledger", &ledger.name, &ledger.evidence)?;
+        if !names.insert(ledger.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeLedgerInadmissible,
+                "runtime ledger names must be unique",
+                vec![ledger.name.clone()],
+            );
+        }
+        if !valid_identifier(&ledger.name) || ledger.retention.trim().is_empty() {
+            return fail(
+                InstabilityKind::RuntimeLedgerInadmissible,
+                "runtime ledger must have a stable name and retention",
+                vec![ledger.name.clone()],
+            );
+        }
+        if !matches!(
+            ledger.store.as_str(),
+            "jsonl" | "sqlite" | "memory" | "eventlog"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeLedgerInadmissible,
+                "runtime ledger store is not registered",
+                vec![ledger.name.clone(), ledger.store.clone()],
+            );
+        }
+        let mut fields = IndexSet::new();
+        for field in &ledger.fields {
+            if !valid_identifier(field) || !fields.insert(field.as_str()) {
+                return fail(
+                    InstabilityKind::RuntimeLedgerInadmissible,
+                    "runtime ledger fields must be stable and unique",
+                    vec![ledger.name.clone(), field.clone()],
+                );
+            }
+        }
+        for required in ["session", "turn", "tool", "status"] {
+            if !fields.contains(required) {
+                return fail(
+                    InstabilityKind::RuntimeLedgerInadmissible,
+                    "runtime ledger must record session, turn, tool, and status fields",
+                    vec![ledger.name.clone(), required.to_owned()],
+                );
+            }
+        }
+    }
+    Ok(cert.runtime_ledgers.len())
+}
+
+fn check_runtime_policies(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for policy in &cert.runtime_policies {
+        require_evidence("runtime-policy", &policy.name, &policy.evidence)?;
+        if !names.insert(policy.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime policy names must be unique",
+                vec![policy.name.clone()],
+            );
+        }
+        if !valid_identifier(&policy.name) {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime policy must have a stable name",
+                vec![policy.name.clone()],
+            );
+        }
+        if !matches!(
+            policy.approval.as_str(),
+            "never" | "on-request" | "on-failure" | "trusted"
+        ) {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime approval mode is not registered",
+                vec![policy.name.clone(), policy.approval.clone()],
+            );
+        }
+        if !matches!(
+            policy.sandbox.as_str(),
+            "read-only" | "workspace-write" | "danger-full-access"
+        ) {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime sandbox mode is not registered",
+                vec![policy.name.clone(), policy.sandbox.clone()],
+            );
+        }
+        if !matches!(policy.network.as_str(), "off" | "guarded" | "on") {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime network mode is not registered",
+                vec![policy.name.clone(), policy.network.clone()],
+            );
+        }
+        if policy.allow.is_empty() {
+            return fail(
+                InstabilityKind::RuntimePolicyInadmissible,
+                "runtime policy must allow at least one tool class or tool name",
+                vec![policy.name.clone()],
+            );
+        }
+    }
+    Ok(cert.runtime_policies.len())
+}
+
+fn check_runtime_sessions(cert: &Certificate) -> Result<usize, KernelError> {
+    let ledger_names = cert
+        .runtime_ledgers
+        .iter()
+        .map(|ledger| ledger.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for session in &cert.runtime_sessions {
+        require_evidence("runtime-session", &session.name, &session.evidence)?;
+        if !names.insert(session.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeSessionInadmissible,
+                "runtime session names must be unique",
+                vec![session.name.clone()],
+            );
+        }
+        if !valid_identifier(&session.name) || !valid_identifier(&session.owner) {
+            return fail(
+                InstabilityKind::RuntimeSessionInadmissible,
+                "runtime session must have stable name and owner",
+                vec![session.name.clone()],
+            );
+        }
+        if !matches!(
+            session.mode.as_str(),
+            "interactive" | "batch" | "autonomous"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeSessionInadmissible,
+                "runtime session mode is not registered",
+                vec![session.name.clone(), session.mode.clone()],
+            );
+        }
+        if !matches!(
+            session.state.as_str(),
+            "planned" | "active" | "paused" | "sealed"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeSessionInadmissible,
+                "runtime session state is not registered",
+                vec![session.name.clone(), session.state.clone()],
+            );
+        }
+        if !ledger_names.contains(session.ledger.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime session references an undeclared ledger",
+                vec![session.name.clone(), session.ledger.clone()],
+            );
+        }
+    }
+    Ok(cert.runtime_sessions.len())
+}
+
+fn check_runtime_tools(cert: &Certificate) -> Result<usize, KernelError> {
+    let policy_names = cert
+        .runtime_policies
+        .iter()
+        .map(|policy| policy.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for tool in &cert.runtime_tools {
+        require_evidence("runtime-tool", &tool.name, &tool.evidence)?;
+        if !names.insert(tool.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeToolInadmissible,
+                "runtime tool names must be unique",
+                vec![tool.name.clone()],
+            );
+        }
+        if !valid_identifier(&tool.name) {
+            return fail(
+                InstabilityKind::RuntimeToolInadmissible,
+                "runtime tool must have a stable name",
+                vec![tool.name.clone()],
+            );
+        }
+        if !matches!(
+            tool.kind.as_str(),
+            "shell" | "patch" | "inspect" | "render" | "model" | "mcp" | "workflow"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeToolInadmissible,
+                "runtime tool kind is not registered",
+                vec![tool.name.clone(), tool.kind.clone()],
+            );
+        }
+        if !matches!(tool.risk.as_str(), "low" | "medium" | "high") {
+            return fail(
+                InstabilityKind::RuntimeToolInadmissible,
+                "runtime tool risk is not registered",
+                vec![tool.name.clone(), tool.risk.clone()],
+            );
+        }
+        if !policy_names.contains(tool.policy.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime tool references an undeclared policy",
+                vec![tool.name.clone(), tool.policy.clone()],
+            );
+        }
+        if tool.reads.is_empty() && tool.writes.is_empty() {
+            return fail(
+                InstabilityKind::RuntimeToolInadmissible,
+                "runtime tool must declare at least one read or write surface",
+                vec![tool.name.clone()],
+            );
+        }
+    }
+    Ok(cert.runtime_tools.len())
+}
+
+fn check_runtime_turns(cert: &Certificate) -> Result<usize, KernelError> {
+    let session_names = cert
+        .runtime_sessions
+        .iter()
+        .map(|session| session.name.as_str())
+        .collect::<IndexSet<_>>();
+    let policy_names = cert
+        .runtime_policies
+        .iter()
+        .map(|policy| policy.name.as_str())
+        .collect::<IndexSet<_>>();
+    let tool_names = cert
+        .runtime_tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for turn in &cert.runtime_turns {
+        require_evidence("runtime-turn", &turn.name, &turn.evidence)?;
+        if !names.insert(turn.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeTurnInadmissible,
+                "runtime turn names must be unique",
+                vec![turn.name.clone()],
+            );
+        }
+        if !valid_identifier(&turn.name) || turn.objective.trim().is_empty() {
+            return fail(
+                InstabilityKind::RuntimeTurnInadmissible,
+                "runtime turn must have a stable name and objective",
+                vec![turn.name.clone()],
+            );
+        }
+        if !session_names.contains(turn.session.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime turn references an undeclared session",
+                vec![turn.name.clone(), turn.session.clone()],
+            );
+        }
+        if !policy_names.contains(turn.policy.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime turn references an undeclared policy",
+                vec![turn.name.clone(), turn.policy.clone()],
+            );
+        }
+        if turn.budget == 0 || turn.budget > 1024 {
+            return fail(
+                InstabilityKind::RuntimeTurnInadmissible,
+                "runtime turn budget must be between 1 and 1024",
+                vec![turn.name.clone(), turn.budget.to_string()],
+            );
+        }
+        if turn.tools.is_empty() {
+            return fail(
+                InstabilityKind::RuntimeTurnInadmissible,
+                "runtime turn must name at least one tool",
+                vec![turn.name.clone()],
+            );
+        }
+        let mut seen = IndexSet::new();
+        for tool in &turn.tools {
+            if !seen.insert(tool.as_str()) || !tool_names.contains(tool.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "runtime turn references an undeclared or duplicated tool",
+                    vec![turn.name.clone(), tool.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.runtime_turns.len())
+}
+
+fn check_runtime_hooks(cert: &Certificate) -> Result<usize, KernelError> {
+    let mut names = IndexSet::new();
+    for hook in &cert.runtime_hooks {
+        require_evidence("runtime-hook", &hook.name, &hook.evidence)?;
+        if !names.insert(hook.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeHookInadmissible,
+                "runtime hook names must be unique",
+                vec![hook.name.clone()],
+            );
+        }
+        if !valid_identifier(&hook.name) || hook.action.trim().is_empty() {
+            return fail(
+                InstabilityKind::RuntimeHookInadmissible,
+                "runtime hook must have a stable name and action",
+                vec![hook.name.clone()],
+            );
+        }
+        if !matches!(
+            hook.event.as_str(),
+            "session-start" | "user-prompt-submit" | "pre-tool-use" | "post-tool-use" | "stop"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeHookInadmissible,
+                "runtime hook event is not registered",
+                vec![hook.name.clone(), hook.event.clone()],
+            );
+        }
+        if !runtime_target_exists(&hook.target, cert) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime hook target is not registered",
+                vec![hook.name.clone(), hook.target.clone()],
+            );
+        }
+    }
+    Ok(cert.runtime_hooks.len())
+}
+
+fn check_runtime_bridges(cert: &Certificate) -> Result<usize, KernelError> {
+    let policy_names = cert
+        .runtime_policies
+        .iter()
+        .map(|policy| policy.name.as_str())
+        .collect::<IndexSet<_>>();
+    let tool_names = cert
+        .runtime_tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<IndexSet<_>>();
+    let mut names = IndexSet::new();
+    for bridge in &cert.runtime_bridges {
+        require_evidence("runtime-bridge", &bridge.name, &bridge.evidence)?;
+        if !names.insert(bridge.name.as_str()) {
+            return fail(
+                InstabilityKind::RuntimeBridgeInadmissible,
+                "runtime bridge names must be unique",
+                vec![bridge.name.clone()],
+            );
+        }
+        if !valid_identifier(&bridge.name) || bridge.endpoint.trim().is_empty() {
+            return fail(
+                InstabilityKind::RuntimeBridgeInadmissible,
+                "runtime bridge must have a stable name and endpoint",
+                vec![bridge.name.clone()],
+            );
+        }
+        if !matches!(
+            bridge.kind.as_str(),
+            "mcp" | "connector" | "plugin" | "stdio" | "uds"
+        ) {
+            return fail(
+                InstabilityKind::RuntimeBridgeInadmissible,
+                "runtime bridge kind is not registered",
+                vec![bridge.name.clone(), bridge.kind.clone()],
+            );
+        }
+        if !policy_names.contains(bridge.policy.as_str()) {
+            return fail(
+                InstabilityKind::UnknownReference,
+                "runtime bridge references an undeclared policy",
+                vec![bridge.name.clone(), bridge.policy.clone()],
+            );
+        }
+        if bridge.exposes.is_empty() {
+            return fail(
+                InstabilityKind::RuntimeBridgeInadmissible,
+                "runtime bridge must expose at least one runtime tool",
+                vec![bridge.name.clone()],
+            );
+        }
+        for tool in &bridge.exposes {
+            if !tool_names.contains(tool.as_str()) {
+                return fail(
+                    InstabilityKind::UnknownReference,
+                    "runtime bridge exposes an undeclared tool",
+                    vec![bridge.name.clone(), tool.clone()],
+                );
+            }
+        }
+    }
+    Ok(cert.runtime_bridges.len())
 }
 
 fn check_graphics(cert: &Certificate) -> Result<usize, KernelError> {
@@ -2621,6 +3362,106 @@ fn check_protocol_proof_obligations(cert: &Certificate) -> Result<(), KernelErro
             "note lacks an admissibility proof",
         )?;
     }
+    for lane in &cert.lanes {
+        require_proof(
+            cert,
+            PropositionKind::LaneAdmissible,
+            &lane.name,
+            "lane lacks an admissibility proof",
+        )?;
+    }
+    for claim in &cert.claims {
+        require_proof(
+            cert,
+            PropositionKind::ClaimAdmissible,
+            &claim.name,
+            "claim lacks an admissibility proof",
+        )?;
+    }
+    for handoff in &cert.handoffs {
+        require_proof(
+            cert,
+            PropositionKind::HandoffAdmissible,
+            &handoff.name,
+            "handoff lacks an admissibility proof",
+        )?;
+    }
+    for sync in &cert.syncs {
+        require_proof(
+            cert,
+            PropositionKind::SyncAdmissible,
+            &sync.name,
+            "sync lacks an admissibility proof",
+        )?;
+    }
+    for checkpoint in &cert.checkpoints {
+        require_proof(
+            cert,
+            PropositionKind::CheckpointAdmissible,
+            &checkpoint.name,
+            "checkpoint lacks an admissibility proof",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_runtime_architecture_proof_obligations(cert: &Certificate) -> Result<(), KernelError> {
+    for ledger in &cert.runtime_ledgers {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeLedgerAdmissible,
+            &ledger.name,
+            "runtime ledger lacks an admissibility proof",
+        )?;
+    }
+    for policy in &cert.runtime_policies {
+        require_proof(
+            cert,
+            PropositionKind::RuntimePolicyAdmissible,
+            &policy.name,
+            "runtime policy lacks an admissibility proof",
+        )?;
+    }
+    for session in &cert.runtime_sessions {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeSessionAdmissible,
+            &session.name,
+            "runtime session lacks an admissibility proof",
+        )?;
+    }
+    for tool in &cert.runtime_tools {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeToolAdmissible,
+            &tool.name,
+            "runtime tool lacks an admissibility proof",
+        )?;
+    }
+    for turn in &cert.runtime_turns {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeTurnAdmissible,
+            &turn.name,
+            "runtime turn lacks an admissibility proof",
+        )?;
+    }
+    for hook in &cert.runtime_hooks {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeHookAdmissible,
+            &hook.name,
+            "runtime hook lacks an admissibility proof",
+        )?;
+    }
+    for bridge in &cert.runtime_bridges {
+        require_proof(
+            cert,
+            PropositionKind::RuntimeBridgeAdmissible,
+            &bridge.name,
+            "runtime bridge lacks an admissibility proof",
+        )?;
+    }
     Ok(())
 }
 
@@ -2876,12 +3717,48 @@ fn valid_relative_text(value: &str) -> bool {
         && !value.split('/').any(|part| part.is_empty() || part == "..")
 }
 
+fn runtime_target_exists(target: &str, cert: &Certificate) -> bool {
+    let Some((kind, subject)) = target.split_once(':') else {
+        return false;
+    };
+    if subject.trim().is_empty() {
+        return false;
+    }
+    match kind {
+        "ledger" => cert
+            .runtime_ledgers
+            .iter()
+            .any(|ledger| ledger.name == subject),
+        "policy" => cert
+            .runtime_policies
+            .iter()
+            .any(|policy| policy.name == subject),
+        "session" => cert
+            .runtime_sessions
+            .iter()
+            .any(|session| session.name == subject),
+        "tool" => cert.runtime_tools.iter().any(|tool| tool.name == subject),
+        "turn" => cert.runtime_turns.iter().any(|turn| turn.name == subject),
+        "bridge" => cert
+            .runtime_bridges
+            .iter()
+            .any(|bridge| bridge.name == subject),
+        _ => false,
+    }
+}
+
 struct ProtocolScopes<'a> {
     objectives: IndexSet<&'a str>,
     milestones: IndexSet<&'a str>,
     tasks: IndexSet<&'a str>,
     gates: IndexSet<&'a str>,
     decisions: IndexSet<&'a str>,
+    notes: IndexSet<&'a str>,
+    lanes: IndexSet<&'a str>,
+    claims: IndexSet<&'a str>,
+    handoffs: IndexSet<&'a str>,
+    syncs: IndexSet<&'a str>,
+    checkpoints: IndexSet<&'a str>,
     transforms: IndexSet<&'a str>,
     validators: IndexSet<&'a str>,
     selections: IndexSet<&'a str>,
@@ -2907,6 +3784,24 @@ fn protocol_scopes(cert: &Certificate) -> ProtocolScopes<'_> {
             .decisions
             .iter()
             .map(|decision| decision.name.as_str())
+            .collect(),
+        notes: cert.notes.iter().map(|note| note.name.as_str()).collect(),
+        lanes: cert.lanes.iter().map(|lane| lane.name.as_str()).collect(),
+        claims: cert
+            .claims
+            .iter()
+            .map(|claim| claim.name.as_str())
+            .collect(),
+        handoffs: cert
+            .handoffs
+            .iter()
+            .map(|handoff| handoff.name.as_str())
+            .collect(),
+        syncs: cert.syncs.iter().map(|sync| sync.name.as_str()).collect(),
+        checkpoints: cert
+            .checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.name.as_str())
             .collect(),
         transforms: cert
             .transforms
@@ -2944,6 +3839,12 @@ fn scope_exists(scope: &str, scopes: &ProtocolScopes<'_>) -> bool {
             "task" => scopes.tasks.contains(subject),
             "gate" => scopes.gates.contains(subject),
             "decision" => scopes.decisions.contains(subject),
+            "note" => scopes.notes.contains(subject),
+            "lane" => scopes.lanes.contains(subject),
+            "claim" => scopes.claims.contains(subject),
+            "handoff" => scopes.handoffs.contains(subject),
+            "sync" => scopes.syncs.contains(subject),
+            "checkpoint" => scopes.checkpoints.contains(subject),
             "transform" => scopes.transforms.contains(subject),
             "validator" => scopes.validators.contains(subject),
             "selection" => scopes.selections.contains(subject),
@@ -2958,11 +3859,118 @@ fn scope_exists(scope: &str, scopes: &ProtocolScopes<'_>) -> bool {
         scopes.tasks.contains(scope),
         scopes.gates.contains(scope),
         scopes.decisions.contains(scope),
+        scopes.notes.contains(scope),
+        scopes.lanes.contains(scope),
+        scopes.claims.contains(scope),
+        scopes.handoffs.contains(scope),
+        scopes.syncs.contains(scope),
+        scopes.checkpoints.contains(scope),
     ]
     .into_iter()
     .filter(|present| *present)
     .count();
     occurrences == 1
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ClaimScope {
+    File(String),
+    Dir(String),
+    Named(String, String),
+    Pattern(String),
+}
+
+fn parse_claim_scope(scope: &str, scopes: &ProtocolScopes<'_>) -> Option<ClaimScope> {
+    let (kind, subject) = scope.split_once(':')?;
+    match kind {
+        "file" => Some(ClaimScope::File(scope_path(subject)?)),
+        "dir" => Some(ClaimScope::Dir(scope_path(subject)?)),
+        "pattern" => {
+            let pattern = scope_text(subject)?;
+            (!pattern.contains('\0')).then_some(ClaimScope::Pattern(pattern))
+        }
+        "objective" | "milestone" | "task" | "gate" | "decision" | "note" | "lane" | "claim"
+        | "handoff" | "sync" | "checkpoint" | "transform" | "validator" | "selection"
+        | "parser" | "workspace" => scope_exists(scope, scopes)
+            .then_some(ClaimScope::Named(kind.to_owned(), subject.to_owned())),
+        _ => None,
+    }
+}
+
+fn claim_scopes_overlap(left: &ClaimScope, right: &ClaimScope) -> bool {
+    match (left, right) {
+        (ClaimScope::File(left), ClaimScope::File(right)) => left == right,
+        (ClaimScope::Dir(left), ClaimScope::Dir(right)) => {
+            path_within(left, right) || path_within(right, left)
+        }
+        (ClaimScope::Dir(dir), ClaimScope::File(file))
+        | (ClaimScope::File(file), ClaimScope::Dir(dir)) => path_within(file, dir),
+        (
+            ClaimScope::Named(left_kind, left_subject),
+            ClaimScope::Named(right_kind, right_subject),
+        ) => left_kind == right_kind && left_subject == right_subject,
+        (ClaimScope::Pattern(left), ClaimScope::Pattern(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn path_within(path: &str, dir: &str) -> bool {
+    path == dir
+        || path
+            .strip_prefix(dir)
+            .is_some_and(|tail| tail.starts_with('/'))
+}
+
+fn scope_path(value: &str) -> Option<String> {
+    let path = scope_text(value)?;
+    valid_relative_text(&path).then_some(path)
+}
+
+fn scope_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with('"') || trimmed.ends_with('"') {
+        return unquote(trimmed);
+    }
+    Some(trimmed.to_owned())
+}
+
+fn unquote(value: &str) -> Option<String> {
+    let body = value.strip_prefix('"')?.strip_suffix('"')?;
+    let mut output = String::new();
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('"') => output.push('"'),
+                Some('\\') => output.push('\\'),
+                Some('n') => output.push('\n'),
+                Some(other) => {
+                    output.push('\\');
+                    output.push(other);
+                }
+                None => output.push('\\'),
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    Some(output)
+}
+
+fn coordination_item_exists(item: &str, scopes: &ProtocolScopes<'_>) -> bool {
+    scope_exists(item, scopes)
+}
+
+fn record_ref_exists(item: &str) -> bool {
+    let Some((kind, subject)) = item.split_once(':') else {
+        return false;
+    };
+    matches!(kind, "record" | "command" | "file")
+        && !subject.trim().is_empty()
+        && !subject.contains('\0')
 }
 
 fn supported_parser_adapter(language: &str, adapter: &str) -> bool {
@@ -3133,6 +4141,54 @@ impl ProofEnvironment for CertificateProofEnvironment<'_> {
                 .iter()
                 .any(|decision| decision.name == subject),
             RowKind::Note => self.cert.notes.iter().any(|note| note.name == subject),
+            RowKind::Lane => self.cert.lanes.iter().any(|lane| lane.name == subject),
+            RowKind::Claim => self.cert.claims.iter().any(|claim| claim.name == subject),
+            RowKind::Handoff => self
+                .cert
+                .handoffs
+                .iter()
+                .any(|handoff| handoff.name == subject),
+            RowKind::Sync => self.cert.syncs.iter().any(|sync| sync.name == subject),
+            RowKind::Checkpoint => self
+                .cert
+                .checkpoints
+                .iter()
+                .any(|checkpoint| checkpoint.name == subject),
+            RowKind::RuntimeLedger => self
+                .cert
+                .runtime_ledgers
+                .iter()
+                .any(|ledger| ledger.name == subject),
+            RowKind::RuntimePolicy => self
+                .cert
+                .runtime_policies
+                .iter()
+                .any(|policy| policy.name == subject),
+            RowKind::RuntimeSession => self
+                .cert
+                .runtime_sessions
+                .iter()
+                .any(|session| session.name == subject),
+            RowKind::RuntimeTool => self
+                .cert
+                .runtime_tools
+                .iter()
+                .any(|tool| tool.name == subject),
+            RowKind::RuntimeTurn => self
+                .cert
+                .runtime_turns
+                .iter()
+                .any(|turn| turn.name == subject),
+            RowKind::RuntimeHook => self
+                .cert
+                .runtime_hooks
+                .iter()
+                .any(|hook| hook.name == subject),
+            RowKind::RuntimeBridge => self
+                .cert
+                .runtime_bridges
+                .iter()
+                .any(|bridge| bridge.name == subject),
             RowKind::Graphics => self
                 .cert
                 .graphics

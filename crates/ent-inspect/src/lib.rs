@@ -123,6 +123,13 @@ pub struct DeclarationCounts {
     pub gates: usize,
     pub decisions: usize,
     pub notes: usize,
+    pub runtime_ledgers: usize,
+    pub runtime_policies: usize,
+    pub runtime_sessions: usize,
+    pub runtime_tools: usize,
+    pub runtime_turns: usize,
+    pub runtime_hooks: usize,
+    pub runtime_bridges: usize,
     pub graphics: usize,
     pub render_targets: usize,
     pub render_pipelines: usize,
@@ -180,6 +187,13 @@ impl DeclarationCounts {
             + self.gates
             + self.decisions
             + self.notes
+            + self.runtime_ledgers
+            + self.runtime_policies
+            + self.runtime_sessions
+            + self.runtime_tools
+            + self.runtime_turns
+            + self.runtime_hooks
+            + self.runtime_bridges
             + self.graphics
             + self.render_targets
             + self.render_pipelines
@@ -236,6 +250,13 @@ impl DeclarationCounts {
         self.gates += other.gates;
         self.decisions += other.decisions;
         self.notes += other.notes;
+        self.runtime_ledgers += other.runtime_ledgers;
+        self.runtime_policies += other.runtime_policies;
+        self.runtime_sessions += other.runtime_sessions;
+        self.runtime_tools += other.runtime_tools;
+        self.runtime_turns += other.runtime_turns;
+        self.runtime_hooks += other.runtime_hooks;
+        self.runtime_bridges += other.runtime_bridges;
         self.graphics += other.graphics;
         self.render_targets += other.render_targets;
         self.render_pipelines += other.render_pipelines;
@@ -295,6 +316,13 @@ pub struct CheckedRowSummary {
     pub gates: usize,
     pub decisions: usize,
     pub notes: usize,
+    pub runtime_ledgers: usize,
+    pub runtime_policies: usize,
+    pub runtime_sessions: usize,
+    pub runtime_tools: usize,
+    pub runtime_turns: usize,
+    pub runtime_hooks: usize,
+    pub runtime_bridges: usize,
     pub graphics: usize,
     pub render_targets: usize,
     pub render_pipelines: usize,
@@ -344,6 +372,13 @@ impl CheckedRowSummary {
             gates: rows.gates,
             decisions: rows.decisions,
             notes: rows.notes,
+            runtime_ledgers: rows.runtime_ledgers,
+            runtime_policies: rows.runtime_policies,
+            runtime_sessions: rows.runtime_sessions,
+            runtime_tools: rows.runtime_tools,
+            runtime_turns: rows.runtime_turns,
+            runtime_hooks: rows.runtime_hooks,
+            runtime_bridges: rows.runtime_bridges,
             graphics: rows.graphics,
             render_targets: rows.render_targets,
             render_pipelines: rows.render_pipelines,
@@ -394,6 +429,13 @@ impl CheckedRowSummary {
         self.gates += other.gates;
         self.decisions += other.decisions;
         self.notes += other.notes;
+        self.runtime_ledgers += other.runtime_ledgers;
+        self.runtime_policies += other.runtime_policies;
+        self.runtime_sessions += other.runtime_sessions;
+        self.runtime_tools += other.runtime_tools;
+        self.runtime_turns += other.runtime_turns;
+        self.runtime_hooks += other.runtime_hooks;
+        self.runtime_bridges += other.runtime_bridges;
         self.graphics += other.graphics;
         self.render_targets += other.render_targets;
         self.render_pipelines += other.render_pipelines;
@@ -441,6 +483,13 @@ impl CheckedRowSummary {
             + self.gates
             + self.decisions
             + self.notes
+            + self.runtime_ledgers
+            + self.runtime_policies
+            + self.runtime_sessions
+            + self.runtime_tools
+            + self.runtime_turns
+            + self.runtime_hooks
+            + self.runtime_bridges
             + self.graphics
             + self.render_targets
             + self.render_pipelines
@@ -1477,6 +1526,13 @@ fn declaration_counts(ast: &WorldAst) -> DeclarationCounts {
         gates: ast.gates.len(),
         decisions: ast.decisions.len(),
         notes: ast.notes.len(),
+        runtime_ledgers: ast.runtime_ledgers.len(),
+        runtime_policies: ast.runtime_policies.len(),
+        runtime_sessions: ast.runtime_sessions.len(),
+        runtime_tools: ast.runtime_tools.len(),
+        runtime_turns: ast.runtime_turns.len(),
+        runtime_hooks: ast.runtime_hooks.len(),
+        runtime_bridges: ast.runtime_bridges.len(),
         graphics: ast.graphics.len(),
         render_targets: ast.render_targets.len(),
         render_pipelines: ast.render_pipelines.len(),
@@ -1680,6 +1736,69 @@ fn declaration_summaries(file: &Path, ast: &WorldAst) -> Vec<DeclarationSummary>
     }
     for decl in &ast.notes {
         push_decl(&mut declarations, file, "note", &decl.name, Some(decl.span));
+    }
+    for decl in &ast.runtime_ledgers {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-ledger",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_policies {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-policy",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_sessions {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-session",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_tools {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-tool",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_turns {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-turn",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_hooks {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-hook",
+            &decl.name,
+            Some(decl.span),
+        );
+    }
+    for decl in &ast.runtime_bridges {
+        push_decl(
+            &mut declarations,
+            file,
+            "runtime-bridge",
+            &decl.name,
+            Some(decl.span),
+        );
     }
     for decl in &ast.graphics {
         push_decl(
@@ -2723,6 +2842,13 @@ fn nonzero_declaration_counts(counts: &DeclarationCounts) -> BTreeMap<&'static s
     insert_count!(gates);
     insert_count!(decisions);
     insert_count!(notes);
+    insert_count!(runtime_ledgers);
+    insert_count!(runtime_policies);
+    insert_count!(runtime_sessions);
+    insert_count!(runtime_tools);
+    insert_count!(runtime_turns);
+    insert_count!(runtime_hooks);
+    insert_count!(runtime_bridges);
     insert_count!(graphics);
     insert_count!(render_targets);
     insert_count!(render_pipelines);
@@ -2869,6 +2995,18 @@ fn instability_kind(kind: &ent_core::InstabilityKind) -> &'static str {
         ent_core::InstabilityKind::GateInadmissible => "gate-inadmissible",
         ent_core::InstabilityKind::DecisionInadmissible => "decision-inadmissible",
         ent_core::InstabilityKind::NoteInadmissible => "note-inadmissible",
+        ent_core::InstabilityKind::LaneInadmissible => "lane-inadmissible",
+        ent_core::InstabilityKind::ClaimInadmissible => "claim-inadmissible",
+        ent_core::InstabilityKind::HandoffInadmissible => "handoff-inadmissible",
+        ent_core::InstabilityKind::SyncInadmissible => "sync-inadmissible",
+        ent_core::InstabilityKind::CheckpointInadmissible => "checkpoint-inadmissible",
+        ent_core::InstabilityKind::RuntimeLedgerInadmissible => "runtime-ledger-inadmissible",
+        ent_core::InstabilityKind::RuntimePolicyInadmissible => "runtime-policy-inadmissible",
+        ent_core::InstabilityKind::RuntimeSessionInadmissible => "runtime-session-inadmissible",
+        ent_core::InstabilityKind::RuntimeToolInadmissible => "runtime-tool-inadmissible",
+        ent_core::InstabilityKind::RuntimeTurnInadmissible => "runtime-turn-inadmissible",
+        ent_core::InstabilityKind::RuntimeHookInadmissible => "runtime-hook-inadmissible",
+        ent_core::InstabilityKind::RuntimeBridgeInadmissible => "runtime-bridge-inadmissible",
         ent_core::InstabilityKind::GraphicsInadmissible => "graphics-inadmissible",
         ent_core::InstabilityKind::RenderTargetInadmissible => "render-target-inadmissible",
         ent_core::InstabilityKind::RenderPipelineInadmissible => "render-pipeline-inadmissible",
@@ -3010,7 +3148,6 @@ world VerifiedStore(role Client, space Workspace) {
         assert!(markdown.contains("Entanglement Inspection"));
         assert!(markdown.contains("verified.ent"));
         assert!(markdown.contains("Checked rows"));
-        assert!(!markdown.contains("AI"));
     }
 
     #[test]

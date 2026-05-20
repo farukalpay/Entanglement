@@ -1,0 +1,18 @@
+[package]
+name = "ent-review"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ent-core = { path = "../ent-core" }
+ent-elab = { path = "../ent-elab" }
+ent-inspect = { path = "../ent-inspect" }
+ent-kernel = { path = "../ent-kernel" }
+ent-transform = { path = "../ent-transform" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
